@@ -1,0 +1,48 @@
+Personal and Educational Free License
+PEF License (PEFL)
+Version 1.0
+Date: 2026-05-26
+Official Specification Repository: https://github.com/RubensRainelli/pefl-license-spec
+
+This license also governs its own text, its own distribution, and its own use; therefore, the license itself cannot be used in a corporate environment without written authorization and payment of the corresponding fee.
+
+Copyright (c) 2026 Rubens Rainelli
+
+Author's Contact Details:
+  - Email: rubens@rainelli.it
+  - GitHub: https://github.com/RubensRainelli/
+  - Phone: (+39) 342 811 5882
+
+1. Definitions.
+"Personal Use" refers to personal, domestic, educational, academic use, or use by schools, universities, and Non-Profit Organizations / Third Sector Entities, without profit motives or direct support for corporate activities.
+Places of worship and religious organizations are explicitly excluded from Personal Use and are considered equivalent to Corporate Use.
+"Corporate Use" refers to any use of the Software in business, professional, productive, or organizational contexts, including servers, PCs, notebooks, workstations, infrastructures, testing, staging, or production environments managed by corporations, companies, religious entities, or equivalent subjects.
+
+2. Permissions.
+Anyone is allowed to use, copy, modify, and redistribute the Software free of charge for Personal Use.
+Modifying the Software is permitted for Personal Use, provided that the author's name, reference to this license, and all original copyright notices remain visible.
+The Software and this license may be hosted, archived, and distributed on any device or medium of any nature.
+
+3. Attribution and Approval Obligations.
+Every copy, distribution, or derivative work of the Software must retain the author's name, Rubens Rainelli, and cannot remove, obscure, or replace the original attribution.
+This license must always be visible, in the foreground, at every launch of the Software (or at least once every 7 days if a local persistence mechanism is available to securely store the acceptance date), and must be explicitly approved by the user before any use.
+Every redistribution must include the license in its current form, without altering the text, version, or conditions.
+
+4. Prohibition of Corporate Use without Authorization.
+Any Corporate Use of the Software, or any use of the Software on corporate-owned machines or machines not intended for exclusive personal use, is prohibited except with written authorization and payment of the corresponding usage fee agreed upon with the author.
+In the absence of such authorization, use in business environments is prohibited even if the Software is not sold or distributed to third parties.
+
+5. Redistribution.
+Anyone may redistribute the Software, with or without modifications, provided that the terms of this license are respected, including retaining the attribution and retaining the current license.
+Distributing the Software under a different license is prohibited without the author's written consent.
+
+6. No Warranty.
+The Software is provided "as is", without warranty of any kind, express or implied.
+The author is not liable for data loss, malfunctions, incompatibility, interruptions, or any other effects deriving from the use of the Software.
+
+7. Liability.
+The use of the Software is at the sole responsibility of the user.
+Any damage, loss, or consequence resulting from the use, abuse, or interpretation of the Software is borne by the user.
+
+8. Acceptance.
+Using, copying, modifying, or redistributing the Software implies full acceptance of the terms of this license.

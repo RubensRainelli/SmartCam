@@ -1,0 +1,48 @@
+Personal and Educational Free License
+PEF License (PEFL)
+Versione 1.0
+Data: 2026-05-26
+Repository Ufficiale della Specifica: https://github.com/RubensRainelli/pefl-license-spec
+
+La presente licenza disciplina anche il proprio testo, la propria distribuzione e il proprio utilizzo; pertanto, la licenza stessa non può essere impiegata in ambito aziendale senza autorizzazione scritta e pagamento della relativa fee.
+
+Copyright (c) 2026 Rubens Rainelli
+
+Contatti dell'Autore:
+  - Email: rubens@rainelli.it
+  - GitHub: https://github.com/RubensRainelli/
+  - Telefono: (+39) 342 811 5882
+
+1. Definizioni.
+Per "Uso Privato" si intende l'uso personale, domestico, didattico, accademico o da parte di scuole, università ed Enti del Terzo Settore, senza finalità di profitto o di supporto diretto ad attività aziendali.
+Sono esclusi dall'Uso Privato gli enti di culto e le organizzazioni religiose, che sono considerati equivalenti a Uso Aziendale.
+Per "Uso Aziendale" si intende qualsiasi uso del Software in contesti business, professionali, produttivi o organizzativi, inclusi server, PC, notebook, workstation, infrastrutture, ambienti di test, staging o produzione gestiti da aziende, enti religiosi o soggetti equivalenti.
+
+2. Permessi.
+È consentito a chiunque usare, copiare, modificare e ridistribuire il Software gratuitamente per Uso Privato.
+È consentito modificare il Software per Uso Privato, purché restino visibili il nome dell'autore, il riferimento alla presente licenza e tutti gli avvisi di copyright originali.
+Il Software e la presente licenza possono essere ospitati, archiviati e distribuiti su qualsiasi dispositivo o supporto di qualunque natura.
+
+3. Obblighi di attribuzione e approvazione.
+Ogni copia, distribuzione o derivato del Software deve mantenere il nome dell'autore, Rubens Rainelli, e non può rimuovere, oscurare o sostituire l'attribuzione originaria.
+La presente licenza deve essere sempre visibile, in primo piano, ad ogni avvio del Software (o almeno una volta ogni 7 giorni qualora sia disponibile un meccanismo di persistenza locale per memorizzare in modo sicuro la data di accettazione), e deve essere esplicitamente approvata dall'utente prima di ogni utilizzo.
+Ogni redistribuzione deve includere la licenza nella sua forma attuale, senza alterarne il testo, la versione o le condizioni.
+
+4. Divieto d'uso aziendale senza autorizzazione.
+Qualsiasi Uso Aziendale del Software, o qualsiasi utilizzo del Software su macchine aziendali o comunque non destinate a esclusivo uso privato, è vietato salvo autorizzazione scritta e pagamento della relativa usage fee concordata con l'autore.
+In assenza di tale autorizzazione, l'uso in ambienti business è proibito anche se il Software non viene venduto o distribuito a terzi.
+
+5. Redistribuzione.
+Chiunque può ridistribuire il Software, con o senza modifiche, purché siano rispettati i termini della presente licenza, incluso il mantenimento dell'attribuzione e il mantenimento della licenza attuale.
+È vietato distribuire il Software con una licenza diversa da quella presente, salvo consenso scritto dell'autore.
+
+6. Nessuna garanzia.
+Il Software è fornito "così com'è", senza alcuna garanzia di alcun tipo, espressa o implicita.
+L'autore non risponde di perdite di dati, malfunzionamenti, incompatibilità, interruzioni o altri effetti derivanti dall'uso del Software.
+
+7. Responsabilità.
+L'uso del Software avviene sotto esclusiva responsabilità di chi lo utilizza.
+Qualsiasi danno, perdita o conseguenza derivante dall'uso, dall'abuso o dall'interpretazione del Software è a carico dell'utente.
+
+8. Accettazione.
+L'uso, la copia, la modifica o la redistribuzione del Software implica l'accettazione integrale dei termini della presente licenza.

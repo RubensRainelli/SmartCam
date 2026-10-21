@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 250" width="100%" height="100%">
+  <!-- Background -->
+  <rect width="100%" height="100%" fill="#0a0a0f"/>
+
+  <!-- Cyber Grid (50px cells) -->
+  <path d="M 0,50 L 400,50 M 0,100 L 400,100 M 0,150 L 400,150 M 0,200 L 400,200 M 50,0 L 50,250 M 100,0 L 100,250 M 150,0 L 150,250 M 200,0 L 200,250 M 250,0 L 250,250 M 300,0 L 300,250 M 350,0 L 350,250" stroke="#141424" stroke-width="1"/>
+
+  <!-- Neon Glow Filters -->
+  <defs>
+    <filter id="glow-cyan" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="5" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+    <filter id="glow-magenta" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+    <filter id="glow-green" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="5" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+    <filter id="glow-yellow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="4" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Top Laser Alignment Line -->
+  <line x1="18" y1="22" x2="382" y2="22" stroke="#ff0055" stroke-width="1.2" opacity="0.7" stroke-dasharray="10 5"/>
+  <text x="20" y="16" fill="#00f0ff" font-family="'Share Tech Mono', monospace" font-size="8.5" letter-spacing="1.5">SYS_ID: SMARTCAM_V1.0 // RUST + C++17 SIMD + GPU</text>
+  <text x="380" y="16" fill="#39ff14" font-family="'Share Tech Mono', monospace" font-size="8.5" text-anchor="end" letter-spacing="1.5">[PEFL v1.0]</text>
+
+  <!-- 45-Degree Circuit Board Traces -->
+  <g stroke="#00f0ff" stroke-width="1.5" fill="none" opacity="0.55">
+    <path d="M 178,76 L 204,76 L 218,62 L 248,62" filter="url(#glow-cyan)"/>
+    <circle cx="248" cy="62" r="3.2" fill="#00f0ff" filter="url(#glow-cyan)"/>
+    <path d="M 178,164 L 204,164 L 218,178 L 248,178"/>
+    <circle cx="178" cy="164" r="3.2" fill="#00f0ff"/>
+  </g>
+  <g stroke="#ff0055" stroke-width="1.5" fill="none" opacity="0.75">
+    <path d="M 178,120 L 248,120" stroke-dasharray="6 4" filter="url(#glow-magenta)"/>
+    <circle cx="213" cy="120" r="3.5" fill="#ff0055" filter="url(#glow-magenta)"/>
+  </g>
+
+  <!-- LEFT PANEL: SmartCam Studio Monitor & 5-Point AI Face Tracker -->
+  <g transform="translate(18, 34)">
+    <polygon points="0,0 152,0 160,8 160,166 8,166 0,158" fill="#0d0d18" stroke="#00f0ff" stroke-width="2" filter="url(#glow-cyan)"/>
+    <line x1="0" y1="20" x2="160" y2="20" stroke="#00f0ff" stroke-width="1.2"/>
+    <circle cx="11" cy="10" r="3" fill="#ff0055"/>
+    <circle cx="21" cy="10" r="3" fill="#fefe00"/>
+    <circle cx="31" cy="10" r="3" fill="#39ff14"/>
+    <text x="95" y="13" fill="#00f0ff" font-family="'Share Tech Mono', monospace" font-size="8" font-weight="bold" text-anchor="middle">VIRTUAL_CAM // 64-BIT</text>
+
+    <!-- Portrait Cutout Frame (4:3 / 16:9) -->
+    <rect x="10" y="28" width="140" height="86" fill="#07070e" stroke="#1e293b" stroke-width="1"/>
+    <!-- AI Subject Silhouette (Head + Shoulders) -->
+    <path d="M 48,114 C 48,92 62,84 80,84 C 98,84 112,92 112,114" fill="#111c2d" stroke="#39ff14" stroke-width="1.6" filter="url(#glow-green)"/>
+    <ellipse cx="80" cy="60" rx="17" ry="21" fill="#132036" stroke="#00f0ff" stroke-width="1.8" filter="url(#glow-cyan)"/>
+
+    <!-- 5-Point Guided Face Calibration Landmarks (Right Eye, Left Eye, Nose, Lips, Chin) -->
+    <circle cx="73" cy="55" r="2.2" fill="#fefe00" filter="url(#glow-yellow)"/>
+    <circle cx="87" cy="55" r="2.2" fill="#fefe00" filter="url(#glow-yellow)"/>
+    <circle cx="80" cy="63" r="2.2" fill="#00f0ff"/>
+    <line x1="74" y1="71" x2="86" y2="71" stroke="#ff0055" stroke-width="1.8"/>
+    <circle cx="80" cy="79" r="2" fill="#39ff14"/>
+
+    <!-- Tracking Crosshair Box -->
+    <path d="M 58,42 L 65,42 M 58,42 L 58,49 M 102,42 L 95,42 M 102,42 L 102,49 M 58,82 L 65,82 M 58,82 L 58,75 M 102,82 L 95,82 M 102,82 L 102,75" stroke="#ff0055" stroke-width="1.2"/>
+
+    <!-- Telemetry Readouts -->
+    <text x="10" y="128" fill="#39ff14" font-family="'Share Tech Mono', monospace" font-size="7.5">&gt; TRACK: 5-PT NCC + KALMAN</text>
+    <text x="10" y="140" fill="#00f0ff" font-family="'Share Tech Mono', monospace" font-size="7.5">&gt; SIMD : AVX-512 / AVX2</text>
+    <text x="10" y="152" fill="#fefe00" font-family="'Share Tech Mono', monospace" font-size="7.5">&gt; GPU  : VULKAN/CUDA/OCL/ROCM</text>
+  </g>
+
+  <!-- CENTER BADGE: Single-Port HTTPS :8080 Bridge -->
+  <g transform="translate(213, 120)">
+    <polygon points="-29,-16 29,-16 35,-10 35,10 -29,10 -35,4" fill="#0a0a14" stroke="#fefe00" stroke-width="1.3" filter="url(#glow-yellow)"/>
+    <text x="0" y="-3" fill="#fefe00" font-family="'Share Tech Mono', monospace" font-size="7.5" font-weight="bold" text-anchor="middle">HTTPS :8080</text>
+    <text x="0" y="6" fill="#39ff14" font-family="'Share Tech Mono', monospace" font-size="6.8" text-anchor="middle">1:1 NATIVE AR</text>
+  </g>
+
+  <!-- RIGHT PANEL: Smartphone OLED Studio Camera Transmitter + Plugin Hub -->
+  <g transform="translate(250, 34)">
+    <polygon points="8,0 124,0 132,8 132,166 124,166 0,166 0,8" fill="#050508" stroke="#ff0055" stroke-width="2" filter="url(#glow-magenta)"/>
+    <!-- Phone Speaker & Lens -->
+    <line x1="50" y1="9" x2="82" y2="9" stroke="#00f0ff" stroke-width="1.5"/>
+    <circle cx="40" cy="9" r="2.2" fill="#39ff14" filter="url(#glow-green)"/>
+
+    <!-- OLED Pure Black Screen Header -->
+    <rect x="8" y="18" width="116" height="18" fill="#000000" stroke="#00f0ff" stroke-width="0.9"/>
+    <text x="66" y="30" fill="#00f0ff" font-family="'Share Tech Mono', monospace" font-size="7.5" font-weight="bold" text-anchor="middle">OLED_PHONE_CAM</text>
+
+    <!-- Multi-Camera & FPS Badges -->
+    <rect x="8" y="42" width="116" height="44" fill="#000000" stroke="#39ff14" stroke-width="1"/>
+    <text x="14" y="54" fill="#39ff14" font-family="'Share Tech Mono', monospace" font-size="7.2">&gt; LENS: WIDE / TELE / SELFIE</text>
+    <text x="14" y="66" fill="#00f0ff" font-family="'Share Tech Mono', monospace" font-size="7.2">&gt; WAKE_LOCK: ANTI-STANDBY</text>
+    <text x="14" y="78" fill="#fefe00" font-family="'Share Tech Mono', monospace" font-size="7.2">&gt; BLACKOUT: 0.00% OLED APL</text>
+
+    <!-- Active Plugins Box -->
+    <rect x="8" y="94" width="116" height="62" fill="#0c0c18" stroke="#ff0055" stroke-width="1"/>
+    <text x="14" y="107" fill="#ff0055" font-family="'Share Tech Mono', monospace" font-size="7.5" font-weight="bold">[PLUGIN_SYSTEM_ABI_V1]</text>
+    <text x="14" y="120" fill="#ffffff" font-family="'Share Tech Mono', monospace" font-size="7">+ multi_person_tracker (x4)</text>
+    <text x="14" y="132" fill="#ffffff" font-family="'Share Tech Mono', monospace" font-size="7">+ studio_color_enhancer</text>
+    <text x="14" y="144" fill="#ffffff" font-family="'Share Tech Mono', monospace" font-size="7">+ teleprompter / webrtc</text>
+  </g>
+
+  <!-- Bottom Technical Status Bar -->
+  <line x1="18" y1="216" x2="382" y2="216" stroke="#00f0ff" stroke-width="1" opacity="0.5"/>
+  <text x="200" y="234" fill="#39ff14" font-family="'Share Tech Mono', monospace" font-size="8.5" text-anchor="middle" letter-spacing="1.8">SYS_AUDIT: WIN11 MF_SOURCE + LINUX V4L2LOOPBACK APPIMAGE // READY</text>
+</svg>

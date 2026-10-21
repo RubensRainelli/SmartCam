@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=SmartCam
+GenericName=AI & Chroma-Key Virtual Camera Studio
+Comment=Real-Time SIMD/GPU Video Processing & v4l2loopback Virtual Camera (PEFL v1.0)
+Exec=SmartCam
+Icon=smartcam
+Terminal=false
+Categories=AudioVideo;Video;Recorder;
+Keywords=webcam;virtual-camera;v4l2loopback;chromakey;greenscreen;background-blur;ai;
+StartupNotify=true
+X-AppImage-Name=SmartCam
+X-AppImage-Version=1.0.0
+X-AppImage-Arch=x86_64

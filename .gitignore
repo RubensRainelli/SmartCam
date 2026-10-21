@@ -1,0 +1,48 @@
+# ==============================================================================
+# Copyright (c) 2026 Rubens Rainelli. All rights reserved.
+# Licensed under the Private & Educational First License (PEFL) v1.0.
+# ==============================================================================
+
+# Local PEFL v1.0 Clause 3 EULA acceptance tokens (machine-specific)
+.pefl_accepted_*
+**/.pefl_accepted_*
+
+# Local hardware benchmark & runtime state (machine-specific)
+config/hardware_benchmark.yaml
+config/plugins_state.conf
+
+# Rust intermediate build artifacts
+app/target/
+platforms/windows/installer_builder/target/
+**/*.rs.bk
+
+# CMake / Ninja intermediate build artifacts (keep final release DLLs/binaries in bin/ and dist/)
+platforms/linux/build/
+platforms/windows/build/out/
+platforms/windows/build/*/CMakeFiles/
+platforms/windows/build/*/CMakeCache.txt
+platforms/windows/build/*/cmake_install.cmake
+platforms/windows/build/*/build.ninja
+platforms/windows/build/*/.ninja_deps
+platforms/windows/build/*/.ninja_log
+platforms/windows/build/*/*.a
+platforms/windows/build/*/*.o
+platforms/windows/build/*/*.obj
+
+# Temporary AppImage packaging directories & tools
+platforms/linux/appimage/SmartCam.AppDir/
+platforms/linux/appimage/appimagetool*
+platforms/linux/appimage/*.tmp
+
+# Uncompressed duplicate BMP backgrounds (JPG versions are tracked)
+assets/backgrounds/*.bmp
+
+# OS & IDE metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

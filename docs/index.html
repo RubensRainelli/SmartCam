@@ -1,0 +1,133 @@
+<!--
+  Personal and Educational Free License (PEF License / PEFL)
+  Version 1.0 - 2026-05-26
+  Copyright (c) 2026 Rubens Rainelli
+
+  Contact Details:
+    Email: rubens@rainelli.it
+    GitHub: https://github.com/RubensRainelli/
+    Tel: (+39) 342 811 5882
+
+  Personal and educational free use permitted.
+  Corporate, business or enterprise use prohibited without written authorization and fee.
+  The full license can be found in the LICENSE file.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#050508" />
+  <title>SMARTCAM // Cyberpunk Tactical Dashboard &amp; Virtual Camera Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&amp;family=Orbitron:wght@700;900&amp;family=Share+Tech+Mono&amp;display=swap" rel="stylesheet" />
+  <link rel="icon" type="image/svg+xml" href="./smartcam.svg" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="crt-overlay"></div>
+
+  <!-- PEFL v1.0 CLAUSE 3 MANDATORY FOREGROUND EULA MODAL -->
+  <div id="pefl-modal" class="modal-backdrop hidden">
+    <div class="pefl-modal">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+        <div>
+          <div class="hero-tag">PEFL v1.0 // CLAUSE 3 MANDATORY CONSENT</div>
+          <h2 class="card-title" id="eula-title">PERSONAL AND EDUCATIONAL FREE LICENSE (PEFL v1.0)</h2>
+        </div>
+        <button class="lang-toggle" onclick="toggleLanguage()">[ EN | IT ]</button>
+      </div>
+      <div style="font-family:var(--font-mono);font-size:0.8rem;color:var(--neon-cyan);margin-top:6px;">
+        Copyright (c) 2026 Rubens Rainelli &bull; rubens@rainelli.it &bull; (+39) 342 811 5882
+      </div>
+      <pre id="eula-text" class="pefl-pre"></pre>
+      <div style="display:flex;justify-content:flex-end;gap:12px;flex-wrap:wrap;">
+        <button class="cyber-btn magenta" onclick="declineEula()" id="btn-decline">DECLINE</button>
+        <button class="cyber-btn green" onclick="acceptEula()" id="btn-accept">ACCEPT PEFL v1.0 (7-DAY CACHE)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- HEADER -->
+  <header class="cyber-header">
+    <div class="brand-wrap">
+      <span class="brand-title">SMARTCAM // v1.0</span>
+      <span class="sys-status">SYS_STATUS: ONLINE // AVX-512 + GPU</span>
+    </div>
+    <div class="header-controls">
+      <button class="lang-toggle" onclick="toggleLanguage()" id="lang-btn">[ EN | IT ]</button>
+      <button class="cyber-btn" onclick="openEulaModal(true)">[ PEFL v1.0 ]</button>
+      <a class="cyber-btn magenta" href="https://github.com/RubensRainelli/SmartCam" target="_blank" rel="noopener">GITHUB REPO</a>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- HERO SECTION -->
+    <section class="hero-grid">
+      <div>
+        <div class="hero-tag" id="hero-tag">NATIVE RUST + C++17 SIMD + MULTI-VENDOR GPU VIRTUAL CAMERA</div>
+        <h1 class="hero-title" id="hero-title">SMARTCAM VIRTUAL STUDIO</h1>
+        <p class="hero-desc" id="hero-desc"></p>
+        <div class="hero-actions">
+          <a class="cyber-btn green" href="https://github.com/RubensRainelli/SmartCam/raw/main/dist/SmartCam_Setup_v1.0.0_x64.exe">⬇ WIN11 INSTALLER (.EXE)</a>
+          <a class="cyber-btn" href="https://github.com/RubensRainelli/SmartCam/raw/main/dist/SmartCam_Portable_v1.0.0_x64.zip">⬇ WIN11 PORTABLE (.ZIP)</a>
+          <a class="cyber-btn magenta" href="https://github.com/RubensRainelli/SmartCam/raw/main/dist/SmartCam-v1.0.0-x86_64.AppImage">⬇ LINUX APPIMAGE (x86_64)</a>
+        </div>
+      </div>
+      <div class="hero-svg-box">
+        <img src="./smartcam.svg" alt="SmartCam Cyberpunk Tactical Architecture SVG" />
+      </div>
+    </section>
+
+    <!-- TERMINAL SEARCH & FILTER BAR -->
+    <section class="toolbar">
+      <div class="terminal-input-wrap">
+        <span class="terminal-prompt">&gt;</span>
+        <input type="text" id="search-input" class="terminal-input" placeholder="query_architecture_modules..." oninput="renderModules()" />
+      </div>
+      <div class="filter-group" id="filter-bar">
+        <button class="filter-btn active" onclick="setFilter('all', this)">ALL</button>
+        <button class="filter-btn" onclick="setFilter('engine', this)">SIMD &amp; GPU</button>
+        <button class="filter-btn" onclick="setFilter('ai', this)">5-PT AI TRACKING</button>
+        <button class="filter-btn" onclick="setFilter('mobile', this)">OLED SMARTPHONE</button>
+        <button class="filter-btn" onclick="setFilter('plugins', this)">PLUGINS &amp; LINUX</button>
+      </div>
+    </section>
+
+    <!-- ARCHITECTURE & FEATURE CARDS -->
+    <section class="cards-grid" id="cards-container"></section>
+
+    <!-- LIVE DUAL-WEBCAM WEB TESTBENCH -->
+    <section class="testbench-panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+        <div>
+          <div class="hero-tag">SIDE-BY-SIDE WEBRTC VERIFICATION</div>
+          <h2 class="card-title" id="tb-title">LIVE DUAL-CAMERA TESTBENCH (RAW UVC VS SMARTCAM)</h2>
+        </div>
+        <button class="cyber-btn green" onclick="startDualCameras()" id="btn-start-cam">▶ ACTIVATE WEBCAMS</button>
+      </div>
+      <div class="testbench-grid">
+        <div class="cam-box">
+          <div class="card-meta"><span>CH_01 // PHYSICAL UVC SENSOR</span><span id="res-a">IDLE</span></div>
+          <select id="sel-cam-a" onchange="switchCam('a')"></select>
+          <video id="vid-a" autoplay playsinline muted></video>
+          <div id="ir-warn-a" class="ir-warning">⚠️ INFRARED (IR / WINDOWS HELLO) SENSOR DETECTED</div>
+        </div>
+        <div class="cam-box">
+          <div class="card-meta"><span>CH_02 // SMARTCAM VIRTUAL OUTPUT</span><span id="res-b">IDLE</span></div>
+          <select id="sel-cam-b" onchange="switchCam('b')"></select>
+          <video id="vid-b" autoplay playsinline muted></video>
+          <div id="ir-warn-b" class="ir-warning">⚠️ INFRARED (IR / WINDOWS HELLO) SENSOR DETECTED</div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      SMARTCAM v1.0.0 // COPYRIGHT (C) 2026 RUBENS RAINELLI // LICENSED UNDER PEFL v1.0 (PERSONAL &amp; EDUCATIONAL FREE LICENSE)
+    </footer>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

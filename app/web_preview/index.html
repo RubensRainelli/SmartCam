@@ -1,0 +1,378 @@
+<!--
+ ============================================================================
+  Project: SmartCam - AI-Powered Virtual Camera & Aspect Ratio Studio
+  File:    app/web_preview/index.html
+
+  Copyright (c) 2026 Rubens Rainelli (Rubens). All rights reserved.
+
+  Licensed under the Personal, Educational & Fair-Use License v1.0 (PEFL v1.0).
+  - Free for personal, academic, educational, and non-commercial research use.
+  - Commercial use requires a separate written commercial license from the
+    copyright holder if annual revenue/funding exceeds EUR 10,000.
+  - Redistribution or public deployment must retain this header, the interactive
+    Clause 3 EULA approval modal on first startup, and the LICENSE.md file.
+ ============================================================================
+-->
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SmartCam Studio — Side-by-Side Web Preview Testbench</title>
+    <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+    <!-- MODALE INTERATTIVO OBBLIGATORIO PEFL v1.0 (CLAUSOLA 3) -->
+    <div id="pefl-modal-overlay" class="pefl-overlay" role="dialog" aria-modal="true" aria-labelledby="pefl-modal-title">
+        <div class="pefl-modal">
+            <div class="pefl-modal-header">
+                <h2 id="pefl-modal-title">Licenza d'Uso SmartCam — PEFL v1.0</h2>
+                <span class="pefl-clause-tag">Clausola 3 — Approvazione in Primo Piano</span>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--text-secondary);">
+                Prima di accedere ai dispositivi video e avviare il banco di prova Side-by-Side, leggi e accetta i termini della licenza <strong>Personal, Educational &amp; Fair-Use License v1.0 (PEFL v1.0)</strong>.
+            </p>
+            <div id="pefl-license-text" class="pefl-license-box"></div>
+            <label class="pefl-checkbox-row" for="pefl-remember-7days">
+                <input type="checkbox" id="pefl-remember-7days" checked />
+                <span>Ricorda la mia approvazione in questo browser per <strong>7 giorni</strong> (localStorage)</span>
+            </label>
+            <div id="pefl-declined-banner" class="pefl-declined-msg hidden">
+                L'accettazione della licenza PEFL v1.0 (Clausola 3) è necessaria per utilizzare SmartCam Web Preview Testbench.
+            </div>
+            <div class="pefl-modal-actions">
+                <button type="button" id="pefl-decline-btn" class="btn btn-danger">Rifiuta</button>
+                <button type="button" id="pefl-accept-btn" class="btn btn-primary">Accetto i Termini PEFL v1.0 e Avvia Studio</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CONTENITORE PRINCIPALE APPLICAZIONE -->
+    <div id="app-main-container" class="app-locked">
+
+        <!-- HEADER STUDIO -->
+        <header class="studio-header">
+            <div class="brand-group">
+                <div class="brand-logo">SC</div>
+                <div class="brand-titles">
+                    <h1>SmartCam Web Preview Testbench</h1>
+                    <div class="brand-subtitle">Confronto Real-Time Side-by-Side: Sorgente Hardware Originale vs SmartCam (100% Zero-Python Native Stack)</div>
+                </div>
+            </div>
+            <div class="header-badges">
+                <span id="crop-quality-badge" class="status-pill quality-pill" title="Stato e qualità del ritaglio geometrico 4:3 vs 16:9">
+                    Ritaglio: Auto-Verifica...
+                </span>
+                <span id="devices-count-badge" class="status-pill">Webcam rilevate: --</span>
+                <button type="button" id="pefl-status-badge" class="status-pill" title="Clicca per rivedere o resettare l'accettazione della licenza PEFL v1.0">
+                    PEFL v1.0
+                </button>
+            </div>
+        </header>
+
+        <!-- BARRA CONTROLLI RAPIDI & PRESET -->
+        <section class="action-toolbar" aria-label="Controlli Rapidi Studio">
+            <div class="toolbar-group">
+                <button type="button" id="btn-start-both" class="btn btn-primary">
+                    ▶ Avvia Entrambe
+                </button>
+                <button type="button" id="btn-stop-both" class="btn btn-danger">
+                    ■ Ferma Entrambe
+                </button>
+                <button type="button" id="btn-refresh-devices" class="btn">
+                    ↻ Aggiorna Dispositivi
+                </button>
+                <button type="button" id="btn-swap-ab" class="btn" title="Scambia le sorgenti tra Camera A e Camera B">
+                    ⇄ Inverti A/B (Swap)
+                </button>
+                <button type="button" id="btn-auto-calibrate" class="btn btn-accent" title="Seleziona automaticamente la migliore webcam a colori non-IR su A e SmartCam su B in formato 4:3 vs 16:9">
+                    ✨ Auto-Calibra 16:9 vs 4:3
+                </button>
+            </div>
+
+            <div class="toolbar-group">
+                <button type="button" id="btn-toggle-mirror" class="btn btn-toggle" title="Specchia orizzontalmente entrambi i flussi video">
+                    ⇋ Specchia Video (Mirror)
+                </button>
+                <button type="button" id="btn-toggle-grid" class="btn btn-toggle" title="Mostra griglia dei terzi e riquadro guida 4:3 dentro 16:9">
+                    ⊞ Griglia Aspect Ratio (4:3 / 16:9)
+                </button>
+                <button type="button" id="btn-toggle-wipe" class="btn btn-toggle" title="Attiva la modalità Wipe Slider sovrapposta Prima/Dopo">
+                    ◧ Modalità Wipe Slider (Prima/Dopo)
+                </button>
+                <button type="button" id="btn-snapshot-png" class="btn btn-success" title="Salva uno screenshot PNG comparativo Side-by-Side con telemetria">
+                    📷 Cattura Snapshot Comparativo (PNG)
+                </button>
+            </div>
+        </section>
+
+        <!-- WORKSPACE -->
+        <main class="studio-workspace">
+
+            <!-- GUIDA ASSISTITA PERMESSI E CONFLITTI WINDOWS 11 (NASCOSTA DI DEFAULT) -->
+            <section id="win11-help-panel" class="win11-assist-card hidden" role="alert" aria-live="polite">
+                <div class="win11-assist-header">
+                    <div class="win11-assist-title-group">
+                        <span class="win11-assist-icon" id="win11-help-icon">🛡️</span>
+                        <div>
+                            <h2 id="win11-help-title">Guida Assistita Windows 11 — Accesso alla Fotocamera</h2>
+                            <p id="win11-help-subtitle">Segui questi semplici passaggi per sbloccare subito la tua webcam senza conoscenze tecniche.</p>
+                        </div>
+                    </div>
+                    <button type="button" id="btn-close-win11-help" class="btn btn-sm" title="Chiudi questo pannello di aiuto">✕ Chiudi</button>
+                </div>
+
+                <div class="win11-steps-grid" id="win11-help-steps">
+                    <div class="win11-step-box">
+                        <span class="step-num">1</span>
+                        <div class="step-body">
+                            <strong>Controlla i Permessi di Windows 11</strong>
+                            <p>Assicurati che <em>"Accesso alla fotocamera"</em> e <em>"Consenti alle app desktop di accedere alla fotocamera"</em> siano entrambi su <strong>Attivato</strong>.</p>
+                        </div>
+                    </div>
+                    <div class="win11-step-box">
+                        <span class="step-num">2</span>
+                        <div class="step-body">
+                            <strong>Chiudi App che Occupano la Webcam</strong>
+                            <p>Se Teams, Zoom, Skype o un'altra finestra usano già la webcam fisica, Windows potrebbe bloccare il secondo accesso diretto. Usa <strong>SmartCam</strong> su Camera B!</p>
+                        </div>
+                    </div>
+                    <div class="win11-step-box">
+                        <span class="step-num">3</span>
+                        <div class="step-body">
+                            <strong>Sblocca il Permesso nel Browser</strong>
+                            <p>Clicca sull'icona del <strong>lucchetto 🔒 o fotocamera 📷</strong> a sinistra dell'indirizzo <code>http://localhost:8080</code> e imposta Fotocamera su <strong>Consenti</strong>.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="win11-assist-actions">
+                    <a href="ms-settings:privacy-webcam" class="btn btn-primary">
+                        ⚙️ Apri Impostazioni Privacy Fotocamera di Windows 11
+                    </a>
+                    <button type="button" id="btn-retry-permissions" class="btn btn-success">
+                        ↻ Riprova Connessione Webcam
+                    </button>
+                </div>
+            </section>
+
+            <!-- BARRA INDICATORE QUALITÀ RITAGLIO 4:3 VS 16:9 & PRESET RAPIDI -->
+            <section class="calibration-banner" aria-label="Indicatore Qualità Ritaglio e Preset Rapidi">
+                <div class="calibration-info">
+                    <span class="calibration-dot" id="calibration-status-dot"></span>
+                    <div>
+                        <strong id="calibration-headline">Analisi Geometria &amp; Ritaglio 4:3 vs 16:9</strong>
+                        <p id="calibration-detail">Avvia i flussi video per confrontare la sorgente widescreen 16:9 e il ritaglio 4:3 (Standard).</p>
+                    </div>
+                </div>
+                <div class="calibration-presets">
+                    <span class="preset-label">Preset Rapidi:</span>
+                    <button type="button" class="btn btn-sm" id="preset-btn-fhd-4x3" title="Camera A in 1920x1080 (16:9) vs Camera B in 1440x1080 (4:3)">
+                        1080p: 16:9 vs 4:3 Crop
+                    </button>
+                    <button type="button" class="btn btn-sm" id="preset-btn-hd-4x3" title="Camera A in 1280x720 (16:9) vs Camera B in 960x720 (4:3)">
+                        720p: 16:9 vs 4:3 Crop
+                    </button>
+                    <button type="button" class="btn btn-sm" id="preset-btn-native" title="Entrambe le telecamere alla risoluzione nativa">
+                        Confronto 1:1 Nativo
+                    </button>
+                </div>
+            </section>
+
+            <!-- SELETTORI CAMERA A & CAMERA B -->
+            <div class="camera-selectors-grid">
+                <!-- Selettore Camera A -->
+                <div class="selector-card cam-a-card">
+                    <div class="selector-header">
+                        <span class="cam-tag tag-a">● Camera A — Sorgente Hardware Originale</span>
+                        <span id="status-badge-a" class="stream-badge">INATTIVA</span>
+                    </div>
+                    <div class="selector-controls">
+                        <select id="select-device-a" class="select-input" aria-label="Seleziona Camera A">
+                            <option value="">-- Seleziona Webcam A --</option>
+                        </select>
+                        <select id="select-preset-a" class="select-input" aria-label="Risoluzione Camera A">
+                            <option value="auto">Auto (Nativa)</option>
+                            <option value="1920x1080" selected>1080p: 1920×1080 (16:9 FHD)</option>
+                            <option value="1440x1080">1080p: 1440×1080 (4:3 FHD)</option>
+                            <option value="1600x900">900p: 1600×900 (16:9 HD+)</option>
+                            <option value="1200x900">900p: 1200×900 (4:3 HD+)</option>
+                            <option value="1280x720">720p: 1280×720 (16:9 HD)</option>
+                            <option value="960x720">720p: 960×720 (4:3 HD)</option>
+                            <option value="960x540">540p: 960×540 (16:9 qHD)</option>
+                            <option value="720x540">540p: 720×540 (4:3 qHD)</option>
+                            <option value="640x480">480p: 640×480 (4:3 SD)</option>
+                            <option value="480x360">360p: 480×360 (4:3 Low)</option>
+                            <option value="320x240">240p: 320×240 (4:3 Ultra-Low)</option>
+                        </select>
+                        <button type="button" id="btn-restart-a" class="btn">Applica A</button>
+                    </div>
+                    <!-- Banner Alert Giallo Non Bloccante per Telecamere IR su Camera A -->
+                    <div id="ir-alert-a" class="ir-warning-banner hidden" role="status">
+                        <div class="ir-warning-text">
+                            ⚠️ <strong>Telecamera a Infrarossi (IR) selezionata:</strong> questo sensore (usato da Windows Hello) produce immagini in bianco e nero o lampeggianti. Puoi comunque utilizzarlo liberamente, oppure passare alla webcam HD a colori.
+                        </div>
+                        <button type="button" id="btn-switch-rgb-a" class="btn btn-sm btn-ir-switch">
+                            Passa a Webcam a Colori
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Selettore Camera B -->
+                <div class="selector-card cam-b-card">
+                    <div class="selector-header">
+                        <span class="cam-tag tag-b">● Camera B — SmartCam</span>
+                        <span id="status-badge-b" class="stream-badge">INATTIVA</span>
+                    </div>
+                    <div class="selector-controls">
+                        <select id="select-device-b" class="select-input" aria-label="Seleziona Camera B">
+                            <option value="">-- Seleziona Webcam B --</option>
+                        </select>
+                        <select id="select-preset-b" class="select-input" aria-label="Risoluzione Camera B">
+                            <option value="auto" selected>Auto (Virtual Cam)</option>
+                            <option value="1920x1080">1080p: 1920×1080 (16:9 FHD)</option>
+                            <option value="1440x1080">1080p: 1440×1080 (4:3 FHD)</option>
+                            <option value="1600x900">900p: 1600×900 (16:9 HD+)</option>
+                            <option value="1200x900">900p: 1200×900 (4:3 HD+)</option>
+                            <option value="1280x720">720p: 1280×720 (16:9 HD)</option>
+                            <option value="960x720">720p: 960×720 (4:3 HD)</option>
+                            <option value="960x540">540p: 960×540 (16:9 qHD)</option>
+                            <option value="720x540">540p: 720×540 (4:3 qHD)</option>
+                            <option value="640x480">480p: 640×480 (4:3 SD)</option>
+                            <option value="480x360">360p: 480×360 (4:3 Low)</option>
+                            <option value="320x240">240p: 320×240 (4:3 Ultra-Low)</option>
+                        </select>
+                        <button type="button" id="btn-restart-b" class="btn">Applica B</button>
+                    </div>
+                    <!-- Banner Alert Giallo Non Bloccante per Telecamere IR su Camera B -->
+                    <div id="ir-alert-b" class="ir-warning-banner hidden" role="status">
+                        <div class="ir-warning-text">
+                            ⚠️ <strong>Telecamera a Infrarossi (IR) selezionata:</strong> questo sensore (usato da Windows Hello) produce immagini in bianco e nero o lampeggianti. Puoi comunque utilizzarlo liberamente, oppure passare alla webcam HD a colori.
+                        </div>
+                        <button type="button" id="btn-switch-rgb-b" class="btn btn-sm btn-ir-switch">
+                            Passa a Webcam a Colori
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- STAGE: SIDE-BY-SIDE 50/50 -->
+            <div class="stage-container">
+                <div id="side-by-side-stage" class="side-by-side-grid">
+
+                    <!-- PANNELLO VIDEO A -->
+                    <div class="video-panel">
+                        <div class="video-viewport">
+                            <div class="viewport-hud-top">
+                                <span class="hud-pill" id="hud-name-a">CAMERA A: Non avviata</span>
+                                <span class="hud-pill" id="hud-res-a">-- × --</span>
+                            </div>
+                            <video id="video-a" autoplay playsinline muted></video>
+                            <div id="placeholder-a" class="video-placeholder">
+                                <strong>Camera A (Sorgente Hardware Originale)</strong>
+                                <span>Premi "Avvia Entrambe" o "Applica A" per visualizzare il flusso.</span>
+                            </div>
+                            <div id="grid-overlay-a" class="aspect-grid-overlay hidden">
+                                <div class="safe-frame-4x3">
+                                    <span class="safe-frame-label">Area 4:3 centrata in 16:9</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="telemetry-bar">
+                            <div class="metric-item">
+                                <span class="metric-label">Risoluzione Negoziata</span>
+                                <span id="metric-res-a" class="metric-value highlight-amber">-- × --</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">Aspect Ratio Reale</span>
+                                <span id="metric-ar-a" class="metric-value">--</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">FPS Misurati</span>
+                                <span id="metric-fps-a" class="metric-value">-- fps</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">Stato Stream</span>
+                                <span id="metric-state-a" class="metric-value">Inattivo</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PANNELLO VIDEO B -->
+                    <div class="video-panel">
+                        <div class="video-viewport">
+                            <div class="viewport-hud-top">
+                                <span class="hud-pill" id="hud-name-b">CAMERA B: Non avviata</span>
+                                <span class="hud-pill" id="hud-res-b">-- × --</span>
+                            </div>
+                            <video id="video-b" autoplay playsinline muted></video>
+                            <div id="placeholder-b" class="video-placeholder">
+                                <strong>Camera B (SmartCam)</strong>
+                                <span>Seleziona "SmartCam" (o una seconda webcam) e avvia lo stream.</span>
+                            </div>
+                            <div id="grid-overlay-b" class="aspect-grid-overlay hidden">
+                                <div class="safe-frame-4x3">
+                                    <span class="safe-frame-label">Area 4:3 centrata in 16:9</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="telemetry-bar">
+                            <div class="metric-item">
+                                <span class="metric-label">Risoluzione Negoziata</span>
+                                <span id="metric-res-b" class="metric-value highlight-cyan">-- × --</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">Aspect Ratio Reale</span>
+                                <span id="metric-ar-b" class="metric-value">--</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">FPS Misurati</span>
+                                <span id="metric-fps-b" class="metric-value">-- fps</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">Stato Stream</span>
+                                <span id="metric-state-b" class="metric-value">Inattivo</span>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- MODALITÀ WIPE SLIDER (PRIMA / DOPO SOVRAPPOSTO) -->
+                <div id="wipe-slider-stage" class="wipe-stage-card hidden">
+                    <div class="wipe-viewport" id="wipe-viewport-box">
+                        <div class="viewport-hud-top">
+                            <span class="hud-pill">◀ PRIMA (Camera A — Originale)</span>
+                            <span class="hud-pill">DOPO (Camera B — SmartCam) ▶</span>
+                        </div>
+                        <div id="wipe-layer-before" class="wipe-layer wipe-layer-before">
+                            <video id="video-wipe-a" autoplay playsinline muted></video>
+                        </div>
+                        <div class="wipe-layer wipe-layer-after">
+                            <video id="video-wipe-b" autoplay playsinline muted></video>
+                        </div>
+                        <div id="wipe-grid-overlay" class="aspect-grid-overlay hidden">
+                            <div class="safe-frame-4x3">
+                                <span class="safe-frame-label">Guida 4:3 su 16:9</span>
+                            </div>
+                        </div>
+                        <div id="wipe-divider-line" class="wipe-divider-line">
+                            <div class="wipe-handle-knob">⇄</div>
+                        </div>
+                    </div>
+                    <div class="wipe-controls-row">
+                        <span style="font-size:0.8rem; color:var(--accent-amber); font-weight:600;">100% Camera A</span>
+                        <input type="range" id="wipe-range-slider" class="wipe-slider-input" min="0" max="100" value="50" aria-label="Cursore di confronto Prima/Dopo" />
+                        <span style="font-size:0.8rem; color:var(--accent-cyan); font-weight:600;">100% Camera B</span>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script src="pefl_web_guard.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# Personal and Educational Free License (PEF License / PEFL)
+# Version 1.0 - 2026-05-26
+# Copyright (c) 2026 Rubens Rainelli
+#
+# Contact Details:
+#   Email: rubens@rainelli.it
+#   GitHub: https://github.com/RubensRainelli/
+#   Tel: (+39) 342 811 5882
+#
+# Personal and educational free use permitted.
+# Corporate, business or enterprise use prohibited without written authorization and fee.
+# The full license can be found in the LICENSE file.
+
+set -euo pipefail
+
+APPDIR="${APPDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/smartcam"
+mkdir -p "$CONFIG_DIR"
+
+# ==============================================================================
+# 1. PEFL v1.0 Clause 3 Mandatory Startup Verification (7-Day Cache)
+# ==============================================================================
+check_pefl_clause3() {
+    local cache_file="$CONFIG_DIR/.pefl_accepted_smartcam"
+    local now_ts
+    now_ts="$(date +%s)"
+    local max_age=$((7 * 24 * 60 * 60))
+
+    for arg in "$@"; do
+        if [[ "$arg" == "--accept-pefl" ]]; then
+            echo "$now_ts" > "$cache_file"
+            return 0
+        fi
+    done
+
+    if [[ -f "$cache_file" ]]; then
+        local last_ts
+        last_ts="$(head -n 1 "$cache_file" 2>/dev/null | tr -d '[:space:]' || echo 0)"
+        if [[ "$last_ts" =~ ^[0-9]+$ ]]; then
+            local age=$((now_ts - last_ts))
+            if (( age >= 0 && age < max_age )); then
+                return 0
+            fi
+        fi
+    fi
+
+    # If launched from desktop without a TTY and zenity/kdialog is available, show graphical modal
+    if [[ ! -t 0 ]]; then
+        local license_summary="Personal and Educational Free License (PEFL) v1.0\nCopyright (c) 2026 Rubens Rainelli (rubens@rainelli.it)\n\n• 100% FREE for Personal, Educational, Academic, and Non-Profit use.\n• STRICTLY PROHIBITED for Corporate, Business, Commercial, or Enterprise use without prior written authorization and fee.\n• Places of worship and religious organizations are classified as Corporate use.\n\nDo you accept the terms of the PEFL v1.0 license (remembered for 7 days)?"
+        if command -v zenity >/dev/null 2>&1; then
+            if zenity --question --title="SmartCam — PEFL v1.0 License Agreement" --width=520 --text="$license_summary"; then
+                echo "$now_ts" > "$cache_file"
+                return 0
+            else
+                exit 1
+            fi
+        elif command -v kdialog >/dev/null 2>&1; then
+            if kdialog --title "SmartCam — PEFL v1.0 License Agreement" --yesno "$license_summary"; then
+                echo "$now_ts" > "$cache_file"
+                return 0
+            else
+                exit 1
+            fi
+        fi
+    fi
+
+    echo "============================================================"
+    echo "        Personal and Educational Free License (PEFL) v1.0"
+    echo "============================================================"
+    echo "Copyright (c) 2026 Rubens Rainelli"
+    echo "Official Specification: https://github.com/RubensRainelli/pefl-license-spec"
+    echo "Author Contact: rubens@rainelli.it | (+39) 342 811 5882"
+    echo ""
+    echo "TERMS OF USE:"
+    echo "  * FREE for Personal, Educational, Academic & Non-Profit use."
+    echo "  * STRICTLY PROHIBITED for Corporate, Professional, or Business use"
+    echo "    without written authorization and fee payment."
+    echo "  * Excludes places of worship and religious organizations (corporate use)."
+    echo "============================================================"
+    read -r -p "Do you accept the terms of the PEFL v1.0 license? (y/N): " choice
+    case "${choice,,}" in
+        y|yes|s|si)
+            echo "$now_ts" > "$cache_file"
+            echo "[SmartCam] PEFL v1.0 license accepted (cached for 7 days)."
+            ;;
+        *)
+            echo "[SmartCam] License rejected. Exiting."
+            exit 1
+            ;;
+    esac
+}
+
+check_pefl_clause3 "$@"
+
+# ==============================================================================
+# 2. Automatic Kernel Module Check (v4l2loopback -> "SmartCam")
+# ==============================================================================
+verify_v4l2loopback() {
+    local found_loopback=0
+    for sys_name in /sys/class/video4linux/video*/name; do
+        if [[ -r "$sys_name" ]]; then
+            local cname
+            cname="$(cat "$sys_name" 2>/dev/null || true)"
+            if [[ "${cname,,}" == *"smartcam"* || "${cname,,}" == *"loopback"* ]]; then
+                found_loopback=1
+                break
+            fi
+        fi
+    done
+
+    if (( found_loopback == 0 )) && ! lsmod 2>/dev/null | grep -q "^v4l2loopback"; then
+        local msg="[SmartCam Linux] Il modulo kernel 'v4l2loopback' non risulta caricato.\n\nPer rendere visibile la webcam virtuale 'SmartCam' in Chrome, Firefox, Zoom, Teams e OBS, esegui una tantum:\n\n  sudo modprobe v4l2loopback devices=1 video_nr=10 card_label=\"SmartCam\" exclusive_caps=1\n\nOppure lancia lo script incluso:\n  sudo \$APPDIR/usr/bin/setup_v4l2loopback.sh"
+        echo -e "\n⚠️  $msg\n" >&2
+        if [[ ! -t 0 ]] && command -v zenity >/dev/null 2>&1; then
+            zenity --warning --title="SmartCam — Modulo v4l2loopback non attivo" --width=540 --text="$msg" || true
+        fi
+    fi
+}
+
+verify_v4l2loopback
+
+# ==============================================================================
+# 3. Automatic AVX-512 vs AVX2 Shared Library Selection
+# ==============================================================================
+export LD_LIBRARY_PATH="${APPDIR}/usr/lib:${LD_LIBRARY_PATH:-}"
+export SMARTCAM_APPDIR="${APPDIR}"
+export SMARTCAM_CONFIG_DIR="${CONFIG_DIR}"
+
+if grep -q "avx512f" /proc/cpuinfo 2>/dev/null && grep -q "avx512bw" /proc/cpuinfo 2>/dev/null; then
+    if [[ -f "${APPDIR}/usr/lib/libsmartcam_engine_avx512.so" ]]; then
+        export SMARTCAM_ENGINE_LIB="${APPDIR}/usr/lib/libsmartcam_engine_avx512.so"
+        export SMARTCAM_SIMD_VARIANT="out_avx512"
+    fi
+fi
+
+if [[ -z "${SMARTCAM_ENGINE_LIB:-}" ]]; then
+    export SMARTCAM_ENGINE_LIB="${APPDIR}/usr/lib/libsmartcam_engine_avx2.so"
+    export SMARTCAM_SIMD_VARIANT="out_avx2"
+fi
+
+# ==============================================================================
+# 4. Launch SmartCam Native Binary
+# ==============================================================================
+exec "${APPDIR}/usr/bin/SmartCam" "$@"

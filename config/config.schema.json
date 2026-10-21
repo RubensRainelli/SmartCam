@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/RubensRainelli/SmartCam/config.schema.json",
+  "title": "SmartCam Configuration Schema",
+  "description": "Configuration schema for SmartCam real-time video pipeline under PEFL v1.0 (Copyright (c) 2026 Rubens Rainelli).",
+  "type": "object",
+  "required": ["camera_input", "framing_output", "segmentation", "compositor", "virtual_camera"],
+  "properties": {
+    "camera_input": {
+      "type": "object",
+      "required": ["device_index", "width", "height", "fps"],
+      "properties": {
+        "device_index": { "type": "integer", "minimum": 0 },
+        "device_id": { "type": "string" },
+        "width": { "type": "integer", "minimum": 160, "maximum": 7680 },
+        "height": { "type": "integer", "minimum": 120, "maximum": 4320 },
+        "fps": { "type": "integer", "minimum": 1, "maximum": 240 }
+      }
+    },
+    "framing_output": {
+      "type": "object",
+      "required": ["aspect_ratio", "crop_strategy", "output_width", "output_height"],
+      "properties": {
+        "aspect_ratio": {
+          "type": "string",
+          "enum": ["native", "16:9", "4:3", "1:1", "9:16", "custom"]
+        },
+        "crop_strategy": {
+          "type": "string",
+          "enum": ["center_crop", "letterbox"]
+        },
+        "output_width": { "type": "integer", "minimum": 160, "maximum": 7680 },
+        "output_height": { "type": "integer", "minimum": 120, "maximum": 4320 }
+      }
+    },
+    "segmentation": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["passthrough", "green_screen", "ai_selfie"]
+        },
+        "green_screen": {
+          "type": "object",
+          "properties": {
+            "hue_min": { "type": "integer", "minimum": 0, "maximum": 180 },
+            "hue_max": { "type": "integer", "minimum": 0, "maximum": 180 },
+            "sat_min": { "type": "integer", "minimum": 0, "maximum": 255 },
+            "sat_max": { "type": "integer", "minimum": 0, "maximum": 255 },
+            "val_min": { "type": "integer", "minimum": 0, "maximum": 255 },
+            "val_max": { "type": "integer", "minimum": 0, "maximum": 255 },
+            "morph_kernel_size": { "type": "integer", "enum": [0, 3, 5] },
+            "blur_radius": { "type": "integer", "minimum": 0, "maximum": 32 },
+            "spill_suppression": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+          }
+        },
+        "ai_selfie": {
+          "type": "object",
+          "properties": {
+            "model_path": { "type": "string" },
+            "input_width": { "type": "integer", "minimum": 64, "maximum": 1024 },
+            "input_height": { "type": "integer", "minimum": 64, "maximum": 1024 },
+            "confidence_threshold": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+            "temporal_smoothing": { "type": "number", "minimum": 0.0, "maximum": 0.95 },
+            "intra_op_threads": { "type": "integer", "minimum": 1, "maximum": 32 },
+            "prefer_igpu_directml": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "compositor": {
+      "type": "object",
+      "required": ["simd_acceleration", "background_mode"],
+      "properties": {
+        "simd_acceleration": {
+          "type": "string",
+          "enum": ["auto", "avx512", "avx2", "scalar"]
+        },
+        "background_mode": {
+          "type": "string",
+          "enum": ["solid_color", "image", "blur"]
+        },
+        "background_color_rgb": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0, "maximum": 255 },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "background_image_path": { "type": "string" },
+        "background_blur_radius": { "type": "integer", "minimum": 1, "maximum": 64 }
+      }
+    },
+    "virtual_camera": {
+      "type": "object",
+      "required": ["friendly_name", "backend"],
+      "properties": {
+        "friendly_name": { "type": "string", "minLength": 1 },
+        "backend": { "type": "string", "enum": ["media_foundation", "directshow", "v4l2loopback", "coremediaio"] },
+        "shared_memory_name": { "type": "string" }
+      }
+    }
+  }
+}
