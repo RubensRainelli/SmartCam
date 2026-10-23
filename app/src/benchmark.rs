@@ -1707,7 +1707,8 @@ fn strip_yaml_comment(line: &str) -> String {
 
 fn clean_scalar(val: &str) -> String {
     let v = val.trim();
-    if (v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\'')) {
+    // len >= 2: a lone `"` or `'` both starts and ends with the quote but has nothing to strip
+    if v.len() >= 2 && ((v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\''))) {
         v[1..v.len() - 1].replace("\\\"", "\"").replace("\\\\", "\\")
     } else {
         v.to_string()
@@ -1818,5 +1819,34 @@ mod tests {
             );
             assert_eq!(strategy, 0, "expected center crop");
         }
+    }
+
+    #[test]
+    fn clean_scalar_keeps_a_lone_quote_character() {
+        assert_eq!(clean_scalar("\""), "\"");
+        assert_eq!(clean_scalar("'"), "'");
+        assert_eq!(clean_scalar("\"\""), "");
+        assert_eq!(clean_scalar(" \"Ryzen \\\"X\\\"\" "), "Ryzen \"X\"");
+    }
+
+    #[test]
+    fn load_benchmark_report_survives_a_lone_quote_value() {
+        let repo_root = std::env::temp_dir().join(format!("smartcam_benchmark_test_{}", std::process::id()));
+        fs::create_dir_all(repo_root.join("config")).expect("create temp config dir");
+        fs::write(
+            benchmark_yaml_path(&repo_root),
+            "benchmark_schema_v2: true\nhardware_fingerprint: \"test\"\ncpu_name: \"\nlogical_cores: 12\n\n\
+             profiles:\n  - profile_id: \"cpu\"\n    label: '\n    available: true\n    avg_frame_ms: 8.000\n",
+        )
+        .expect("write benchmark yaml");
+
+        let report = load_benchmark_report(&repo_root);
+        let _ = fs::remove_dir_all(&repo_root);
+
+        let report = report.expect("report");
+        assert_eq!(report.cpu_name, "\"");
+        assert_eq!(report.logical_cores, 12);
+        assert_eq!(report.profiles.len(), 1);
+        assert_eq!(report.profiles[0].label, "'");
     }
 }
