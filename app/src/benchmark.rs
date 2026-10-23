@@ -1501,9 +1501,11 @@ fn measure_profile_metrics(
                             width,
                             height,
                             width * 4,
-                            240,
-                            0,
+                            // aspect_w, aspect_h, strategy (0 = center crop): crop to the output
+                            // aspect, like the pure-Rust pass below (1920x1080 -> 1440x1080)
                             width,
+                            height,
+                            0,
                         );
                     }
                     if let Some(f_ai) = lib.fn_ai_mask {
@@ -1714,4 +1716,107 @@ fn clean_scalar(val: &str) -> String {
 
 fn escape_yaml_str(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// (dst_width, dst_height, aspect_w, aspect_h, strategy) of every recorded crop call.
+    static CROP_CALLS: Mutex<Vec<(u32, u32, u32, u32, u32)>> = Mutex::new(Vec::new());
+
+    unsafe extern "C" fn recording_crop_scale(
+        _src: *const u8,
+        _src_w: u32,
+        _src_h: u32,
+        _src_stride: u32,
+        _dst: *mut u8,
+        dst_w: u32,
+        dst_h: u32,
+        _dst_stride: u32,
+        aspect_w: u32,
+        aspect_h: u32,
+        strategy: u32,
+    ) -> i32 {
+        CROP_CALLS.lock().unwrap().push((dst_w, dst_h, aspect_w, aspect_h, strategy));
+        1
+    }
+
+    /// An engine "library" with no DLL behind it: only the crop entry point is set.
+    fn library_with_recording_crop() -> NativeEngineLibrary {
+        NativeEngineLibrary {
+            hmodule: std::ptr::null_mut(),
+            loaded_dll_path: PathBuf::new(),
+            variant_name: String::new(),
+            fn_crop_scale: Some(recording_crop_scale),
+            fn_create: None,
+            fn_destroy: None,
+            fn_get_simd: None,
+            fn_cfg_gs: None,
+            fn_autocal_gs: None,
+            fn_gs_mask: None,
+            fn_ai_mask: None,
+            fn_fill_solid: None,
+            fn_blur_bg: None,
+            fn_blend: None,
+            fn_set_ref_bg: None,
+            fn_clear_ref_bg: None,
+            fn_has_ref_bg: None,
+            fn_set_ai_mode_tol: None,
+            fn_get_subj_center: None,
+            fn_set_hardware_policy: None,
+            fn_get_compute_backend: None,
+            fn_get_compute_device_name: None,
+            fn_is_ai_enabled: None,
+            fn_calibrate_face_landmarks: None,
+            fn_set_face_calibration_profile: None,
+            fn_set_face_calibration_landmarks: None,
+            fn_set_silhouette_mode: None,
+            fn_get_silhouette_mode: None,
+            fn_set_multi_person_mode: None,
+            fn_cam_count: None,
+            fn_cam_info: None,
+            fn_cam_create: None,
+            fn_cam_open: None,
+            fn_cam_read: None,
+            fn_cam_close: None,
+            fn_cam_destroy: None,
+            fn_sink_create: None,
+            fn_sink_init: None,
+            fn_sink_push: None,
+            fn_sink_active: None,
+            fn_sink_destroy: None,
+        }
+    }
+
+    #[test]
+    fn benchmark_crops_the_camera_frame_to_the_output_aspect() {
+        let lib = library_with_recording_crop();
+        let engine_handle = std::ptr::NonNull::<u8>::dangling().as_ptr() as *mut c_void;
+        let (src_w, src_h, out_w, out_h) = (1920u32, 1080u32, 1440u32, 1080u32);
+        let mut src = vec![0u8; (src_w * src_h * 4) as usize];
+        let mut fg = vec![0u8; (out_w * out_h * 4) as usize];
+        let mut bg = fg.clone();
+        let mut out = fg.clone();
+        let mut mask = vec![0u8; (out_w * out_h) as usize];
+
+        measure_profile_metrics(
+            Some(&lib), engine_handle, 1, 0, false,
+            &mut src, src_w, src_h, &mut fg, &mut bg, &mut mask, &mut out, out_w, out_h,
+        );
+
+        let calls = CROP_CALLS.lock().unwrap().clone();
+        assert!(!calls.is_empty(), "the benchmark never called smartcam_engine_crop_scale_bgra");
+        for (dst_w, dst_h, aspect_w, aspect_h, strategy) in calls {
+            assert_eq!((dst_w, dst_h), (out_w, out_h));
+            // c_api.h: aspect_w:aspect_h is the crop aspect, strategy 0 = center crop, 1 = letterbox.
+            assert_eq!(
+                aspect_w as u64 * out_h as u64,
+                aspect_h as u64 * out_w as u64,
+                "crop aspect {aspect_w}:{aspect_h} is not the {out_w}x{out_h} output aspect"
+            );
+            assert_eq!(strategy, 0, "expected center crop");
+        }
+    }
 }
