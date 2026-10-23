@@ -197,7 +197,7 @@ public:
     FrameBuffer(const FrameBuffer& other) {
         if (other.IsValid()) {
             Allocate(other.view_.width, other.view_.height, other.view_.format);
-            std::memcpy(view_.data, other.view_.data, capacity_);
+            std::memcpy(view_.data, other.view_.data, SizeBytes());
             view_.timestamp_ns = other.view_.timestamp_ns;
             view_.frame_index  = other.view_.frame_index;
         }
@@ -207,7 +207,7 @@ public:
         if (this != &other) {
             if (other.IsValid()) {
                 Allocate(other.view_.width, other.view_.height, other.view_.format);
-                std::memcpy(view_.data, other.view_.data, capacity_);
+                std::memcpy(view_.data, other.view_.data, SizeBytes());
                 view_.timestamp_ns = other.view_.timestamp_ns;
                 view_.frame_index  = other.view_.frame_index;
             } else {
