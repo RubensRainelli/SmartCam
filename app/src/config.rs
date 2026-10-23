@@ -1086,4 +1086,20 @@ mod tests {
         assert!(yaml.contains("\ncompositor:\n  compute_backend: \"auto\""), "{yaml}");
         assert!(yaml.contains("\nvirtual_camera:\n  friendly_name: \"SmartCam\"\n"), "{yaml}");
     }
+
+    #[test]
+    fn shipped_default_config_is_read_back_as_written() {
+        let shipped = include_str!("../../config/default_config.yaml").replace('\r', "");
+        let path = temp_yaml_path("shipped_default");
+        fs::write(&path, &shipped).expect("write shipped default copy");
+        let mut cfg = SmartCamConfig::load_from_file(&path);
+
+        // Nested value that differs from SmartCamConfig::default() ("ai_selfie").
+        assert_eq!(cfg.segmentation.mode, "passthrough");
+
+        cfg.save_to_file(&path).expect("save_to_file");
+        let resaved = fs::read_to_string(&path).expect("read resaved yaml").replace('\r', "");
+        let _ = fs::remove_file(&path);
+        assert_eq!(resaved, shipped, "config/default_config.yaml is not in the format save_to_file writes");
+    }
 }
