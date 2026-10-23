@@ -959,7 +959,8 @@ fn strip_yaml_comment(line: &str) -> String {
 
 fn clean_scalar(val: &str) -> String {
     let v = val.trim();
-    if (v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\'')) {
+    // len >= 2: a lone `"` or `'` both starts and ends with the quote but has nothing to strip
+    if v.len() >= 2 && ((v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\''))) {
         v[1..v.len() - 1].replace("\\\\", "\\")
     } else {
         v.to_string()
@@ -1101,5 +1102,26 @@ mod tests {
         let resaved = fs::read_to_string(&path).expect("read resaved yaml").replace('\r', "");
         let _ = fs::remove_file(&path);
         assert_eq!(resaved, shipped, "config/default_config.yaml is not in the format save_to_file writes");
+    }
+
+    #[test]
+    fn clean_scalar_keeps_a_lone_quote_character() {
+        assert_eq!(clean_scalar("\""), "\"");
+        assert_eq!(clean_scalar("'"), "'");
+        assert_eq!(clean_scalar("\"\""), "");
+        assert_eq!(clean_scalar("''"), "");
+        assert_eq!(clean_scalar(" \"cam 1\" "), "cam 1");
+    }
+
+    #[test]
+    fn load_from_file_survives_a_lone_quote_value() {
+        let path = temp_yaml_path("lone_quote");
+        fs::write(&path, "camera_input:\n  device_id: \"\n  fps: 25\nenabled_plugins:\n  - '\n").expect("write yaml");
+        let cfg = SmartCamConfig::load_from_file(&path);
+        let _ = fs::remove_file(&path);
+
+        assert_eq!(cfg.camera_input.device_id, "\"");
+        assert_eq!(cfg.camera_input.fps, 25);
+        assert_eq!(cfg.enabled_plugins, vec!["'".to_string()]);
     }
 }
