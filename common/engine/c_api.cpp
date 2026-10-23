@@ -255,8 +255,10 @@ bool ComputeUltraFastNonAiMask(const uint8_t* src_bgra,
         if (ny < 0.15f || ny > 0.58f) continue;
 
         // Sample left and right border pixels on the same row to ignore wooden stairs/walls extending from border
-        const int bL = src_row[4 + 0], gL = src_row[4 + 1], rL = src_row[4 + 2];
-        const size_t r_off = static_cast<size_t>(width - 2) * 4;
+        // (one pixel in from each edge, clamped so frames narrower than 3 px stay inside the row)
+        const size_t l_off = static_cast<size_t>(std::min(1u, width - 1)) * 4;
+        const int bL = src_row[l_off + 0], gL = src_row[l_off + 1], rL = src_row[l_off + 2];
+        const size_t r_off = static_cast<size_t>(width >= 2 ? width - 2 : 0) * 4;
         const int bR = src_row[r_off + 0], gR = src_row[r_off + 1], rR = src_row[r_off + 2];
 
         for (uint32_t gx = 2; gx + 2 < kCoarseW; ++gx) {
