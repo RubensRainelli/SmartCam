@@ -247,19 +247,29 @@ pub fn set_engine_hardware_policy(
     simd_mode: u32,
     ai_enabled: bool,
 ) -> bool {
-    if lib.hmodule.is_null() || engine_handle.is_null() {
+    if engine_handle.is_null() {
         return false;
     }
     unsafe {
-        if let Some(f_policy) =
-            load_proc_local::<FnSetHardwarePolicy>(lib.hmodule, b"smartcam_engine_set_hardware_policy\0")
-        {
+        if let Some(f_policy) = lib.fn_set_hardware_policy {
             return f_policy(
                 engine_handle,
                 compute_backend,
                 simd_mode,
                 if ai_enabled { 1 } else { 0 },
             ) == 1;
+        }
+        if !lib.hmodule.is_null() {
+            if let Some(f_policy) =
+                load_proc_local::<FnSetHardwarePolicy>(lib.hmodule, b"smartcam_engine_set_hardware_policy\0")
+            {
+                return f_policy(
+                    engine_handle,
+                    compute_backend,
+                    simd_mode,
+                    if ai_enabled { 1 } else { 0 },
+                ) == 1;
+            }
         }
     }
     false
@@ -279,37 +289,53 @@ pub fn set_engine_hardware_policy_by_names(
     set_engine_hardware_policy(lib, engine_handle, backend_id, simd_id, ai_enabled)
 }
 
-/// Returns a formatted label of the active compute backend + SIMD tier from the native C++ engine.
+/// Returns a formatted label of the active compute backend + SIMD tier from the native Rust engine.
 pub fn get_active_compute_backend_label(
     lib: &NativeEngineLibrary,
     engine_handle: *mut c_void,
 ) -> String {
-    if lib.hmodule.is_null() || engine_handle.is_null() {
-        return "Rust Vectorized Fallback".to_string();
+    if engine_handle.is_null() {
+        return "Pure Rust Vectorized Engine".to_string();
     }
     unsafe {
         let mut backend_str = "CPU".to_string();
         let mut device_str = String::new();
         let mut simd_str = "AVX2".to_string();
 
-        if let Some(f_backend) = load_proc_local::<FnGetActiveComputeBackend>(
-            lib.hmodule,
-            b"smartcam_engine_get_active_compute_backend\0",
-        ) {
+        if let Some(f_backend) = lib.fn_get_compute_backend {
             let ptr = f_backend(engine_handle);
             if !ptr.is_null() {
                 backend_str = CStr::from_ptr(ptr).to_string_lossy().to_string();
             }
+        } else if !lib.hmodule.is_null() {
+            if let Some(f_backend) = load_proc_local::<FnGetActiveComputeBackend>(
+                lib.hmodule,
+                b"smartcam_engine_get_active_compute_backend\0",
+            ) {
+                let ptr = f_backend(engine_handle);
+                if !ptr.is_null() {
+                    backend_str = CStr::from_ptr(ptr).to_string_lossy().to_string();
+                }
+            }
         }
-        if let Some(f_dev) = load_proc_local::<FnGetActiveComputeDeviceName>(
-            lib.hmodule,
-            b"smartcam_engine_get_active_compute_device_name\0",
-        ) {
+
+        if let Some(f_dev) = lib.fn_get_compute_device_name {
             let ptr = f_dev(engine_handle);
             if !ptr.is_null() {
                 device_str = CStr::from_ptr(ptr).to_string_lossy().to_string();
             }
+        } else if !lib.hmodule.is_null() {
+            if let Some(f_dev) = load_proc_local::<FnGetActiveComputeDeviceName>(
+                lib.hmodule,
+                b"smartcam_engine_get_active_compute_device_name\0",
+            ) {
+                let ptr = f_dev(engine_handle);
+                if !ptr.is_null() {
+                    device_str = CStr::from_ptr(ptr).to_string_lossy().to_string();
+                }
+            }
         }
+
         if let Some(f_simd) = lib.fn_get_simd {
             let ptr = f_simd(engine_handle);
             if !ptr.is_null() {
@@ -317,7 +343,7 @@ pub fn get_active_compute_backend_label(
             }
         }
 
-        if backend_str.eq_ignore_ascii_case("CPU") {
+        if backend_str.eq_ignore_ascii_case("CPU") || backend_str.eq_ignore_ascii_case("Auto") {
             format!("CPU {} ({})", simd_str, lib.variant_name)
         } else if !device_str.is_empty() {
             format!("GPU {} — {} (+{})", backend_str, device_str, simd_str)

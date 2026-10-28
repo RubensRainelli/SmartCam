@@ -1252,12 +1252,17 @@ struct GpuAccelerator::RuntimeImpl {
             return false;
         }
 
-        if (vk_mapped_src && pfn_vkUnmapMemory) { pfn_vkUnmapMemory(vk_device, vk_staging_src_mem); vk_mapped_src = nullptr; }
-        if (vk_mapped_dst && pfn_vkUnmapMemory) { pfn_vkUnmapMemory(vk_device, vk_staging_dst_mem); vk_mapped_dst = nullptr; }
-        if (vk_staging_src && pfn_vkDestroyBuffer) { pfn_vkDestroyBuffer(vk_device, vk_staging_src, nullptr); vk_staging_src = 0; }
-        if (vk_staging_dst && pfn_vkDestroyBuffer) { pfn_vkDestroyBuffer(vk_device, vk_staging_dst, nullptr); vk_staging_dst = 0; }
-        if (vk_staging_src_mem && pfn_vkFreeMemory) { pfn_vkFreeMemory(vk_device, vk_staging_src_mem, nullptr); vk_staging_src_mem = 0; }
-        if (vk_staging_dst_mem && pfn_vkFreeMemory) { pfn_vkFreeMemory(vk_device, vk_staging_dst_mem, nullptr); vk_staging_dst_mem = 0; }
+        auto cleanup_partial_vk_buffers = [&]() noexcept {
+            if (vk_mapped_src && pfn_vkUnmapMemory) { pfn_vkUnmapMemory(vk_device, vk_staging_src_mem); vk_mapped_src = nullptr; }
+            if (vk_mapped_dst && pfn_vkUnmapMemory) { pfn_vkUnmapMemory(vk_device, vk_staging_dst_mem); vk_mapped_dst = nullptr; }
+            if (vk_staging_src && pfn_vkDestroyBuffer) { pfn_vkDestroyBuffer(vk_device, vk_staging_src, nullptr); vk_staging_src = 0; }
+            if (vk_staging_dst && pfn_vkDestroyBuffer) { pfn_vkDestroyBuffer(vk_device, vk_staging_dst, nullptr); vk_staging_dst = 0; }
+            if (vk_staging_src_mem && pfn_vkFreeMemory) { pfn_vkFreeMemory(vk_device, vk_staging_src_mem, nullptr); vk_staging_src_mem = 0; }
+            if (vk_staging_dst_mem && pfn_vkFreeMemory) { pfn_vkFreeMemory(vk_device, vk_staging_dst_mem, nullptr); vk_staging_dst_mem = 0; }
+            vk_buffer_cap = 0;
+        };
+
+        cleanup_partial_vk_buffers();
 
         VkBufferCreateInfo_Min buf_info{};
         buf_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO_VAL;
@@ -1266,6 +1271,7 @@ struct GpuAccelerator::RuntimeImpl {
 
         if (pfn_vkCreateBuffer(vk_device, &buf_info, nullptr, &vk_staging_src) != VK_SUCCESS_VAL ||
             pfn_vkCreateBuffer(vk_device, &buf_info, nullptr, &vk_staging_dst) != VK_SUCCESS_VAL) {
+            cleanup_partial_vk_buffers();
             return false;
         }
 
@@ -1285,16 +1291,19 @@ struct GpuAccelerator::RuntimeImpl {
 
         if (pfn_vkAllocateMemory(vk_device, &alloc_src, nullptr, &vk_staging_src_mem) != VK_SUCCESS_VAL ||
             pfn_vkAllocateMemory(vk_device, &alloc_dst, nullptr, &vk_staging_dst_mem) != VK_SUCCESS_VAL) {
+            cleanup_partial_vk_buffers();
             return false;
         }
 
         if (pfn_vkBindBufferMemory(vk_device, vk_staging_src, vk_staging_src_mem, 0) != VK_SUCCESS_VAL ||
             pfn_vkBindBufferMemory(vk_device, vk_staging_dst, vk_staging_dst_mem, 0) != VK_SUCCESS_VAL) {
+            cleanup_partial_vk_buffers();
             return false;
         }
 
         if (pfn_vkMapMemory(vk_device, vk_staging_src_mem, 0, byte_size, 0, &vk_mapped_src) != VK_SUCCESS_VAL ||
             pfn_vkMapMemory(vk_device, vk_staging_dst_mem, 0, byte_size, 0, &vk_mapped_dst) != VK_SUCCESS_VAL) {
+            cleanup_partial_vk_buffers();
             return false;
         }
 
@@ -1503,6 +1512,9 @@ struct GpuAccelerator::RuntimeImpl {
             cl_buf_bg  = pfn_clCreateBuffer(cl_ctx, CL_MEM_READ_WRITE_VAL, rgba_bytes, nullptr, &err);
             cl_buf_out = pfn_clCreateBuffer(cl_ctx, CL_MEM_READ_WRITE_VAL, rgba_bytes, nullptr, &err);
             if (!cl_buf_fg || !cl_buf_bg || !cl_buf_out) {
+                if (cl_buf_fg)  { pfn_clReleaseMemObject(cl_buf_fg);  cl_buf_fg  = nullptr; }
+                if (cl_buf_bg)  { pfn_clReleaseMemObject(cl_buf_bg);  cl_buf_bg  = nullptr; }
+                if (cl_buf_out) { pfn_clReleaseMemObject(cl_buf_out); cl_buf_out = nullptr; }
                 cl_rgba_cap = 0;
                 return false;
             }

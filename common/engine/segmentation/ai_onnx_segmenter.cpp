@@ -209,22 +209,23 @@ inline float ComputeTrueFacialSkinScore(float r,
     return std::clamp(universal_score, 0.0f, 1.0f);
 }
 
-// Fast O(1) 2D Summed Area Table (Integral Image) helper
+// Fast O(1) 2D Summed Area Table (Integral Image) helper backed by an external reusable buffer
 struct IntegralGrid {
     uint32_t w = 0;
     uint32_t h = 0;
-    std::vector<float> data;
+    std::vector<float>* storage = nullptr;
 
-    void Build(const float* src, uint32_t width, uint32_t height) {
+    void Build(const float* src, uint32_t width, uint32_t height, std::vector<float>& backing_buf) {
         w = width;
         h = height;
-        data.assign(static_cast<size_t>(w + 1) * (h + 1), 0.0f);
+        storage = &backing_buf;
+        storage->assign(static_cast<size_t>(w + 1) * (h + 1), 0.0f);
         const uint32_t stride = w + 1;
         for (uint32_t y = 0; y < h; ++y) {
             float row_sum = 0.0f;
             const float* src_row = src + static_cast<size_t>(y) * w;
-            const float* prev_row = data.data() + static_cast<size_t>(y) * stride;
-            float* dst_row = data.data() + static_cast<size_t>(y + 1) * stride;
+            const float* prev_row = storage->data() + static_cast<size_t>(y) * stride;
+            float* dst_row = storage->data() + static_cast<size_t>(y + 1) * stride;
             for (uint32_t x = 0; x < w; ++x) {
                 row_sum += src_row[x];
                 dst_row[x + 1] = prev_row[x + 1] + row_sum;
@@ -238,6 +239,7 @@ struct IntegralGrid {
         x1 = std::clamp(x1, x0 + 1, static_cast<int>(w));
         y1 = std::clamp(y1, y0 + 1, static_cast<int>(h));
         const uint32_t stride = w + 1;
+        const float* data = storage->data();
         const float sum = data[static_cast<size_t>(y1) * stride + x1]
                         - data[static_cast<size_t>(y0) * stride + x1]
                         - data[static_cast<size_t>(y1) * stride + x0]
@@ -1078,9 +1080,18 @@ void AiOnnxSegmenter::RunPortraitHeuristicFallback(const float* input_nhwc,
     const uint32_t top_band_h  = std::max(3u, th / 10);
     const uint32_t side_band_w = std::max(3u, tw / 12);
 
-    std::vector<float> bg_row_y_L(th, 128.0f), bg_row_cb_L(th, 128.0f), bg_row_cr_L(th, 128.0f);
-    std::vector<float> bg_row_y_R(th, 128.0f), bg_row_cb_R(th, 128.0f), bg_row_cr_R(th, 128.0f);
-    std::vector<float> bg_col_y_T(tw, 128.0f), bg_col_cb_T(tw, 128.0f), bg_col_cr_T(tw, 128.0f);
+    bg_row_y_L_.assign(th, 128.0f); bg_row_cb_L_.assign(th, 128.0f); bg_row_cr_L_.assign(th, 128.0f);
+    bg_row_y_R_.assign(th, 128.0f); bg_row_cb_R_.assign(th, 128.0f); bg_row_cr_R_.assign(th, 128.0f);
+    bg_col_y_T_.assign(tw, 128.0f); bg_col_cb_T_.assign(tw, 128.0f); bg_col_cr_T_.assign(tw, 128.0f);
+    auto& bg_row_y_L  = bg_row_y_L_;
+    auto& bg_row_cb_L = bg_row_cb_L_;
+    auto& bg_row_cr_L = bg_row_cr_L_;
+    auto& bg_row_y_R  = bg_row_y_R_;
+    auto& bg_row_cb_R = bg_row_cb_R_;
+    auto& bg_row_cr_R = bg_row_cr_R_;
+    auto& bg_col_y_T  = bg_col_y_T_;
+    auto& bg_col_cb_T = bg_col_cb_T_;
+    auto& bg_col_cr_T = bg_col_cr_T_;
 
     for (uint32_t y = 0; y < th; ++y) {
         float sy_L = 0.0f, scb_L = 0.0f, scr_L = 0.0f;
@@ -1118,10 +1129,14 @@ void AiOnnxSegmenter::RunPortraitHeuristicFallback(const float* input_nhwc,
     // ------------------------------------------------------------------------
     // 2. Per-Pixel True Facial Skin Map, Background Contrast & Gradient Maps
     // ------------------------------------------------------------------------
-    std::vector<float> skin_map(num_pixels, 0.0f);
-    std::vector<float> luma_curr(num_pixels, 0.0f);
-    std::vector<float> bg_diff_map(num_pixels, 0.0f);
-    std::vector<float> feat_grad_map(num_pixels, 0.0f);
+    skin_map_.assign(num_pixels, 0.0f);
+    luma_curr_.assign(num_pixels, 0.0f);
+    bg_diff_map_.assign(num_pixels, 0.0f);
+    feat_grad_map_.assign(num_pixels, 0.0f);
+    auto& skin_map      = skin_map_;
+    auto& luma_curr     = luma_curr_;
+    auto& bg_diff_map   = bg_diff_map_;
+    auto& feat_grad_map = feat_grad_map_;
     float max_bg_diff = 0.0f;
 
     for (uint32_t y = 0; y < th; ++y) {
@@ -1238,9 +1253,9 @@ void AiOnnxSegmenter::RunPortraitHeuristicFallback(const float* input_nhwc,
     IntegralGrid sat_skin;
     IntegralGrid sat_grad;
     IntegralGrid sat_luma;
-    sat_skin.Build(skin_map.data(), tw, th);
-    sat_grad.Build(feat_grad_map.data(), tw, th);
-    sat_luma.Build(luma_curr.data(), tw, th);
+    sat_skin.Build(skin_map.data(), tw, th, sat_skin_buf_);
+    sat_grad.Build(feat_grad_map.data(), tw, th, sat_grad_buf_);
+    sat_luma.Build(luma_curr.data(), tw, th, sat_luma_buf_);
 
     struct FaceCandidate {
         float cx    = 0.50f;
@@ -1248,9 +1263,12 @@ void AiOnnxSegmenter::RunPortraitHeuristicFallback(const float* input_nhwc,
         float rx    = 0.105f;
         float score = 0.0f;
     };
-    std::vector<FaceCandidate> raw_candidates;
+    thread_local std::vector<FaceCandidate> raw_candidates;
+    raw_candidates.clear();
     if (config_.multi_person_enabled) {
-        raw_candidates.reserve(256);
+        if (raw_candidates.capacity() < 256) {
+            raw_candidates.reserve(256);
+        }
     }
 
     float best_score = -1.0f;
@@ -1587,26 +1605,27 @@ void AiOnnxSegmenter::RunPortraitHeuristicFallback(const float* input_nhwc,
             std::sort(raw_candidates.begin(), raw_candidates.end(),
                       [](const FaceCandidate& a, const FaceCandidate& b) { return a.score > b.score; });
 
-            std::vector<FaceCandidate> selected;
-            selected.reserve(4);
+            FaceCandidate selected[4];
+            size_t selected_count = 0;
             const float min_valid_score = 0.28f * best_score;
 
             for (const auto& cand : raw_candidates) {
                 if (cand.score < min_valid_score) break;
                 bool overlaps = false;
-                for (const auto& sel : selected) {
+                for (size_t s = 0; s < selected_count; ++s) {
+                    const auto& sel = selected[s];
                     if (std::abs(cand.cx - sel.cx) < 1.45f * (cand.rx + sel.rx)) {
                         overlaps = true;
                         break;
                     }
                 }
                 if (!overlaps) {
-                    selected.push_back(cand);
-                    if (selected.size() >= 4) break;
+                    selected[selected_count++] = cand;
+                    if (selected_count >= 4) break;
                 }
             }
 
-            for (size_t i = 0; i < selected.size() && num_persons < 4; ++i) {
+            for (size_t i = 0; i < selected_count && num_persons < 4; ++i) {
                 float r_cx = selected[i].cx;
                 float r_cy = selected[i].cy;
                 float r_rad = selected[i].rx;
@@ -1742,7 +1761,8 @@ void AiOnnxSegmenter::RunReferenceBackgroundSubtraction(const float* input_nhwc,
     }
 
     // Convert current frame to YCbCr
-    std::vector<float> curr_ycbcr(num_pixels * 3, 0.0f);
+    curr_ycbcr_.assign(num_pixels * 3, 0.0f);
+    auto& curr_ycbcr = curr_ycbcr_;
     for (size_t i = 0; i < num_pixels; ++i) {
         const size_t idx3 = i * 3;
         Rgb01ToYCbCr(input_nhwc[idx3 + 0], input_nhwc[idx3 + 1], input_nhwc[idx3 + 2],
@@ -1754,8 +1774,10 @@ void AiOnnxSegmenter::RunReferenceBackgroundSubtraction(const float* input_nhwc,
     //          Global Room Brightness/Chrominance Compensation
     // ------------------------------------------------------------------------
     const uint32_t side_w = std::max(4u, tw / 10);
-    std::vector<float> raw_row_dy(th, 0.0f);
-    std::vector<float> row_dy(th, 0.0f);
+    raw_row_dy_.assign(th, 0.0f);
+    row_dy_.assign(th, 0.0f);
+    auto& raw_row_dy = raw_row_dy_;
+    auto& row_dy     = row_dy_;
     float sum_dcb_global = 0.0f;
     float sum_dcr_global = 0.0f;
     uint32_t cnt_global  = 0;
@@ -1876,7 +1898,8 @@ void AiOnnxSegmenter::RunReferenceBackgroundSubtraction(const float* input_nhwc,
     // Stage 3: 3x3 Density Filter + Morphological Opening +
     //          Scanline Silhouette Fill (100% Solid Human Figure, Zero Holes!)
     // ------------------------------------------------------------------------
-    std::vector<float> density_map(num_pixels, 0.0f);
+    density_map_.assign(num_pixels, 0.0f);
+    auto& density_map = density_map_;
     for (uint32_t y = 0; y < th; ++y) {
         const uint32_t y0 = (y > 0) ? (y - 1) : 0;
         const uint32_t y2 = (y + 1 < th) ? (y + 1) : (th - 1);
@@ -1929,8 +1952,10 @@ void AiOnnxSegmenter::RunReferenceBackgroundSubtraction(const float* input_nhwc,
         }
     }
 
-    std::vector<int> scan_left(th, -1);
-    std::vector<int> scan_right(th, -2);
+    scan_left_.assign(th, -1);
+    scan_right_.assign(th, -2);
+    auto& scan_left  = scan_left_;
+    auto& scan_right = scan_right_;
 
     if (sum_w > 1.5f) {
         const float coarse_cx = std::clamp(sum_wx / sum_w, 0.05f, 0.95f);

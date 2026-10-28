@@ -215,6 +215,7 @@ impl Default for SmartCamConfig {
     }
 }
 
+#[allow(dead_code)]
 pub fn compute_center_crop_rect(src_w: u32, src_h: u32, aspect_w: u32, aspect_h: u32) -> (u32, u32, u32, u32) {
     if src_w == 0 || src_h == 0 || aspect_w == 0 || aspect_h == 0 {
         return (0, 0, src_w, src_h);

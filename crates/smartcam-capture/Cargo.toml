@@ -1,0 +1,18 @@
+# Personal and Educational Free License (PEF License / PEFL)
+# Version 1.0 - 2026-05-26
+# Copyright (c) 2026 Rubens Rainelli
+
+[package]
+name = "smartcam-capture"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SmartCam v2.0 Cross-Platform Camera Capture & Virtual Camera Sink (Media Foundation on Windows, V4L2 on Linux, CoreMediaIO on macOS)"
+publish = false
+
+[dependencies]
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_System_Com_StructuredStorage"] }
+windows-core = { workspace = true }

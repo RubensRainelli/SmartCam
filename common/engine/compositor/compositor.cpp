@@ -350,7 +350,11 @@ bool SimdCompositor::GenerateBlurredBackground(const FrameView& src, FrameView& 
     const int32_t r  = static_cast<int32_t>(std::clamp(radius, 1u, 64u));
     const uint32_t diam = static_cast<uint32_t>(2 * r + 1);
 
-    std::vector<uint8_t> temp(static_cast<size_t>(w) * h * 4);
+    const size_t needed_bytes = static_cast<size_t>(w) * h * 4;
+    thread_local std::vector<uint8_t> temp;
+    if (temp.size() < needed_bytes) {
+        temp.resize(needed_bytes);
+    }
 
     // Horizontal O(1) sliding window pass
     for (uint32_t y = 0; y < h; ++y) {

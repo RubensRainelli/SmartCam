@@ -161,11 +161,36 @@ STDMETHODIMP SmartCamMfMediaStream::RequestSample(IUnknown* pToken) {
 
     const DWORD buffer_size = width_ * height_ * 4;
     Microsoft::WRL::ComPtr<IMFMediaBuffer> media_buffer;
-    HRESULT hr = MFCreateMemoryBuffer(buffer_size, &media_buffer);
-    if (FAILED(hr)) return hr;
+
+    // Select or reuse a buffer from the fixed 3-slot pool when not held downstream
+    for (size_t i = 0; i < 3; ++i) {
+        const size_t slot = (pool_cursor_ + i) % 3;
+        if (!buffer_pool_[slot]) {
+            if (SUCCEEDED(MFCreateMemoryBuffer(buffer_size, &buffer_pool_[slot]))) {
+                media_buffer = buffer_pool_[slot];
+                pool_cursor_ = (slot + 1) % 3;
+                break;
+            }
+        } else {
+            // Test if buffer_pool_[slot] has ref_count == 1 (only held by buffer_pool_[slot])
+            buffer_pool_[slot].Get()->AddRef();
+            const ULONG rc_after_add = buffer_pool_[slot].Get()->Release();
+            DWORD max_len = 0;
+            if (rc_after_add == 1 && SUCCEEDED(buffer_pool_[slot]->GetMaxLength(&max_len)) && max_len >= buffer_size) {
+                media_buffer = buffer_pool_[slot];
+                pool_cursor_ = (slot + 1) % 3;
+                break;
+            }
+        }
+    }
+
+    if (!media_buffer) {
+        HRESULT hr_alloc = MFCreateMemoryBuffer(buffer_size, &media_buffer);
+        if (FAILED(hr_alloc)) return hr_alloc;
+    }
 
     BYTE* raw_ptr = nullptr;
-    hr = media_buffer->Lock(&raw_ptr, nullptr, nullptr);
+    HRESULT hr = media_buffer->Lock(&raw_ptr, nullptr, nullptr);
     if (FAILED(hr)) return hr;
 
     uint32_t ipc_w = 0, ipc_h = 0;
@@ -186,13 +211,15 @@ STDMETHODIMP SmartCamMfMediaStream::RequestSample(IUnknown* pToken) {
             } else {
                 const size_t src_bytes = static_cast<size_t>(hdr->width) * hdr->height * 4;
                 if (src_bytes <= SharedFrameHeader::kMaxFrameBytes) {
-                    std::vector<uint8_t> temp(src_bytes);
-                    if (ipc_.ReadFrame(temp.data(), temp.size(), ipc_w, ipc_h, ts_100ns) &&
+                    if (ipc_frame_scratch_.size() < src_bytes) {
+                        ipc_frame_scratch_.resize(src_bytes);
+                    }
+                    if (ipc_.ReadFrame(ipc_frame_scratch_.data(), src_bytes, ipc_w, ipc_h, ts_100ns) &&
                         ipc_w > 0 && ipc_h > 0) {
                         for (uint32_t dy = 0; dy < height_; ++dy) {
                             const uint32_t sy = (dy * ipc_h) / height_;
                             uint8_t* dst_row = raw_ptr + static_cast<size_t>(dy) * width_ * 4;
-                            const uint8_t* src_row = temp.data() + static_cast<size_t>(sy) * ipc_w * 4;
+                            const uint8_t* src_row = ipc_frame_scratch_.data() + static_cast<size_t>(sy) * ipc_w * 4;
                             for (uint32_t dx = 0; dx < width_; ++dx) {
                                 const uint32_t sx = (dx * ipc_w) / width_;
                                 dst_row[dx * 4 + 0] = src_row[sx * 4 + 0];
@@ -259,6 +286,11 @@ HRESULT SmartCamMfMediaStream::ShutdownStream() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (is_shutdown_) return S_OK;
     is_shutdown_ = true;
+    for (auto& buf : buffer_pool_) {
+        buf.Reset();
+    }
+    ipc_frame_scratch_.clear();
+    ipc_frame_scratch_.shrink_to_fit();
     ipc_.Close();
     if (event_queue_) {
         event_queue_->Shutdown();

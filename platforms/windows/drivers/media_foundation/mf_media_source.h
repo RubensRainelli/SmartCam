@@ -37,6 +37,7 @@
 #include <mfobjects.h>
 #include <wrl/client.h>
 #include <mutex>
+#include <vector>
 
 #include "../../ipc/shared_frame_ipc.h"
 #include "smartcam_mf_guids.h"
@@ -143,6 +144,9 @@ private:
     uint32_t                                          height_       = 1080;
     uint64_t                                          sample_count_ = 0;
     bool                                              is_shutdown_  = false;
+    std::vector<uint8_t>                              ipc_frame_scratch_;
+    Microsoft::WRL::ComPtr<IMFMediaBuffer>            buffer_pool_[3];
+    size_t                                            pool_cursor_  = 0;
 };
 
 }  // namespace windows

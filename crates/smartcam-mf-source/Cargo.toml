@@ -1,0 +1,23 @@
+# Personal and Educational Free License (PEF License / PEFL)
+# Version 1.0 - 2026-05-26
+# Copyright (c) 2026 Rubens Rainelli
+
+[package]
+name = "smartcam_mf_source"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SmartCam v2.0 Pure Media Foundation In-Process COM Virtual Camera Source (smartcam_mf_source.dll)"
+publish = false
+
+[lib]
+name = "smartcam_mf_source"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+smartcam-capture = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_System_Com_StructuredStorage"] }
+windows-core = { workspace = true }

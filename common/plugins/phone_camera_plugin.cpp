@@ -388,7 +388,7 @@ int32_t PhonePluginCReadFrame(
     if (!plugin || !out_bgra || width == 0 || height == 0 || stride < width * 4) {
         return 0;
     }
-    FrameBuffer temp_frame;
+    thread_local FrameBuffer temp_frame;
     if (!plugin->ReadFrame(temp_frame, timeout_ms) || !temp_frame.IsValid()) {
         return 0;
     }

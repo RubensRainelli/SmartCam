@@ -245,9 +245,19 @@ pub struct AppGuiState {
     pub dropdown_trigger_rects: [(DropdownKind, RECT); 4],
     pub dropdown_overlay_zones: Vec<HitZone>,
     pub dropdown_menu_rect: RECT,
-    // Active loaded HICONs
+    // Active loaded HICONs & cached GDI double-buffer resources
     pub current_hicon_big: HICON,
     pub current_hicon_small: HICON,
+    pub backbuf_dc: HDC,
+    pub backbuf_bmp: HBITMAP,
+    pub backbuf_old_bmp: HGDIOBJ,
+    pub backbuf_w: i32,
+    pub backbuf_h: i32,
+    pub font_title: HFONT,
+    pub font_sub: HFONT,
+    pub font_btn: HFONT,
+    pub font_small: HFONT,
+    pub crop_modal_scratch: Vec<u8>,
 }
 
 static mut GLOBAL_APP: *mut AppGuiState = std::ptr::null_mut();
@@ -427,6 +437,58 @@ impl AppGuiState {
             dropdown_menu_rect: RECT::new(0, 0, 0, 0),
             current_hicon_big: std::ptr::null_mut(),
             current_hicon_small: std::ptr::null_mut(),
+            backbuf_dc: std::ptr::null_mut(),
+            backbuf_bmp: std::ptr::null_mut(),
+            backbuf_old_bmp: std::ptr::null_mut(),
+            backbuf_w: 0,
+            backbuf_h: 0,
+            font_title: std::ptr::null_mut(),
+            font_sub: std::ptr::null_mut(),
+            font_btn: std::ptr::null_mut(),
+            font_small: std::ptr::null_mut(),
+            crop_modal_scratch: Vec::new(),
+        }
+    }
+
+    pub unsafe fn release_gdi_resources(&mut self) {
+        if !self.backbuf_dc.is_null() {
+            if !self.backbuf_old_bmp.is_null() {
+                SelectObject(self.backbuf_dc, self.backbuf_old_bmp);
+                self.backbuf_old_bmp = std::ptr::null_mut();
+            }
+            if !self.backbuf_bmp.is_null() {
+                DeleteObject(self.backbuf_bmp);
+                self.backbuf_bmp = std::ptr::null_mut();
+            }
+            DeleteDC(self.backbuf_dc);
+            self.backbuf_dc = std::ptr::null_mut();
+        }
+        self.backbuf_w = 0;
+        self.backbuf_h = 0;
+
+        if !self.font_title.is_null() {
+            DeleteObject(self.font_title);
+            self.font_title = std::ptr::null_mut();
+        }
+        if !self.font_sub.is_null() {
+            DeleteObject(self.font_sub);
+            self.font_sub = std::ptr::null_mut();
+        }
+        if !self.font_btn.is_null() {
+            DeleteObject(self.font_btn);
+            self.font_btn = std::ptr::null_mut();
+        }
+        if !self.font_small.is_null() {
+            DeleteObject(self.font_small);
+            self.font_small = std::ptr::null_mut();
+        }
+        if !self.current_hicon_big.is_null() {
+            DestroyIcon(self.current_hicon_big);
+            self.current_hicon_big = std::ptr::null_mut();
+        }
+        if !self.current_hicon_small.is_null() {
+            DestroyIcon(self.current_hicon_small);
+            self.current_hicon_small = std::ptr::null_mut();
         }
     }
 
@@ -2009,6 +2071,9 @@ pub unsafe fn load_theme_icon(repo_root: &Path, theme: &str, size: i32) -> HICON
 }
 
 unsafe fn apply_window_and_tray_icon(hwnd: HWND, app: &mut AppGuiState) {
+    let old_big = app.current_hicon_big;
+    let old_small = app.current_hicon_small;
+
     let big = load_theme_icon(&app.repo_root, &app.cfg.app_icon_theme, 32);
     let small = load_theme_icon(&app.repo_root, &app.cfg.app_icon_theme, 16);
 
@@ -2017,6 +2082,13 @@ unsafe fn apply_window_and_tray_icon(hwnd: HWND, app: &mut AppGuiState) {
 
     app.current_hicon_big = big;
     app.current_hicon_small = small;
+
+    if !old_big.is_null() && old_big != big {
+        DestroyIcon(old_big);
+    }
+    if !old_small.is_null() && old_small != small {
+        DestroyIcon(old_small);
+    }
 
     let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
     nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as DWORD;
@@ -2036,12 +2108,20 @@ unsafe fn apply_window_and_tray_icon(hwnd: HWND, app: &mut AppGuiState) {
 // ============================================================================
 
 unsafe fn register_tray_icon(hwnd: HWND, app: &mut AppGuiState) {
+    let old_big = app.current_hicon_big;
+    let old_small = app.current_hicon_small;
     let small = load_theme_icon(&app.repo_root, &app.cfg.app_icon_theme, 16);
     let big = load_theme_icon(&app.repo_root, &app.cfg.app_icon_theme, 32);
     SendMessageW(hwnd, WM_SETICON, ICON_BIG, big as LPARAM);
     SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small as LPARAM);
     app.current_hicon_big = big;
     app.current_hicon_small = small;
+    if !old_big.is_null() && old_big != big {
+        DestroyIcon(old_big);
+    }
+    if !old_small.is_null() && old_small != small {
+        DestroyIcon(old_small);
+    }
 
     let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
     nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as DWORD;
@@ -2360,9 +2440,37 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
     let win_w = client_rc.width().max(100);
     let win_h = client_rc.height().max(100);
 
-    let mem_dc = CreateCompatibleDC(hdc_win);
-    let mem_bmp = CreateCompatibleBitmap(hdc_win, win_w, win_h);
-    let old_bmp = SelectObject(mem_dc, mem_bmp);
+    if app.backbuf_dc.is_null() || app.backbuf_bmp.is_null() || app.backbuf_w != win_w || app.backbuf_h != win_h {
+        if !app.backbuf_dc.is_null() {
+            if !app.backbuf_old_bmp.is_null() {
+                SelectObject(app.backbuf_dc, app.backbuf_old_bmp);
+                app.backbuf_old_bmp = std::ptr::null_mut();
+            }
+            if !app.backbuf_bmp.is_null() {
+                DeleteObject(app.backbuf_bmp);
+                app.backbuf_bmp = std::ptr::null_mut();
+            }
+            DeleteDC(app.backbuf_dc);
+        }
+        app.backbuf_dc = CreateCompatibleDC(hdc_win);
+        app.backbuf_bmp = CreateCompatibleBitmap(hdc_win, win_w, win_h);
+        app.backbuf_old_bmp = SelectObject(app.backbuf_dc, app.backbuf_bmp);
+        app.backbuf_w = win_w;
+        app.backbuf_h = win_h;
+    }
+    let mem_dc = app.backbuf_dc;
+
+    if app.font_title.is_null() {
+        let fname = to_wstring("Segoe UI");
+        app.font_title = CreateFontW(-19, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0, fname.as_ptr());
+        app.font_sub = CreateFontW(-14, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0, fname.as_ptr());
+        app.font_btn = CreateFontW(-13, 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 5, 0, fname.as_ptr());
+        app.font_small = CreateFontW(-12, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, fname.as_ptr());
+    }
+    let f_title = app.font_title;
+    let f_sub = app.font_sub;
+    let f_btn = app.font_btn;
+    let f_small = app.font_small;
 
     app.hit_zones.clear();
     app.dropdown_overlay_zones.clear();
@@ -2373,11 +2481,6 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
     DeleteObject(bg_main);
 
     SetBkMode(mem_dc, TRANSPARENT);
-    let fname = to_wstring("Segoe UI");
-    let f_title = CreateFontW(-19, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0, fname.as_ptr());
-    let f_sub = CreateFontW(-14, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0, fname.as_ptr());
-    let f_btn = CreateFontW(-13, 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 5, 0, fname.as_ptr());
-    let f_small = CreateFontW(-12, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, fname.as_ptr());
 
     // ========================================================================
     // 1. Top Header Bar (`y = 0..48`, Zero Overlap)
@@ -3261,14 +3364,6 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
     }
 
     BitBlt(hdc_win, 0, 0, win_w, win_h, mem_dc, 0, 0, SRCCOPY);
-
-    SelectObject(mem_dc, old_bmp);
-    DeleteObject(mem_bmp);
-    DeleteDC(mem_dc);
-    DeleteObject(f_title);
-    DeleteObject(f_sub);
-    DeleteObject(f_btn);
-    DeleteObject(f_small);
 
     EndPaint(hwnd, &ps);
 }
@@ -5354,7 +5449,10 @@ unsafe fn paint_crop_modal_overlay(
             app.cfg.compositor.background_pan_y,
         );
 
-        let mut modal_src = vec![0u8; app.pipeline.bg_source_image.len()];
+        let needed_modal_bytes = app.pipeline.bg_source_image.len();
+        if app.crop_modal_scratch.len() != needed_modal_bytes {
+            app.crop_modal_scratch.resize(needed_modal_bytes, 0);
+        }
         let sw = app.pipeline.bg_source_w as usize;
         let sh = app.pipeline.bg_source_h as usize;
         let mir_h = app.cfg.compositor.background_mirror_h;
@@ -5375,10 +5473,10 @@ unsafe fn paint_crop_modal_overlay(
                     g = (g as u16 * 35 / 100) as u8;
                     r = (r as u16 * 35 / 100) as u8;
                 }
-                modal_src[dst_idx] = b;
-                modal_src[dst_idx + 1] = g;
-                modal_src[dst_idx + 2] = r;
-                modal_src[dst_idx + 3] = 255;
+                app.crop_modal_scratch[dst_idx] = b;
+                app.crop_modal_scratch[dst_idx + 1] = g;
+                app.crop_modal_scratch[dst_idx + 2] = r;
+                app.crop_modal_scratch[dst_idx + 3] = 255;
             }
         }
 
@@ -5401,7 +5499,7 @@ unsafe fn paint_crop_modal_overlay(
             0,
             src_w,
             src_h,
-            modal_src.as_ptr() as *const c_void,
+            app.crop_modal_scratch.as_ptr() as *const c_void,
             &bmi,
             DIB_RGB_COLORS,
             SRCCOPY,
@@ -5909,6 +6007,7 @@ unsafe extern "system" fn main_wnd_proc(
         WM_MOUSEMOVE => {
             let x = (lparam & 0xFFFF) as i16 as i32;
             let y = ((lparam >> 16) & 0xFFFF) as i16 as i32;
+            let old_pos = app.hover_pos;
             app.hover_pos = POINT { x, y };
 
             if app.crop_modal_open && app.crop_dragging {
@@ -5944,7 +6043,14 @@ unsafe extern "system" fn main_wnd_proc(
             } else {
                 SetCursor(LoadCursorW(NULL, IDC_ARROW));
             }
-            InvalidateRect(hwnd, std::ptr::null(), FALSE);
+
+            let old_hit = app.hit_zones.iter().position(|z| z.rect.contains(old_pos.x, old_pos.y));
+            let new_hit = app.hit_zones.iter().position(|z| z.rect.contains(x, y));
+            let old_dd = app.dropdown_overlay_zones.iter().position(|z| z.rect.contains(old_pos.x, old_pos.y));
+            let new_dd = app.dropdown_overlay_zones.iter().position(|z| z.rect.contains(x, y));
+            if old_hit != new_hit || old_dd != new_dd {
+                InvalidateRect(hwnd, std::ptr::null(), FALSE);
+            }
             0
         }
         WM_LBUTTONDOWN => {
@@ -6192,6 +6298,7 @@ unsafe extern "system" fn main_wnd_proc(
         WM_DESTROY => {
             KillTimer(hwnd, TIMER_FRAME_ID);
             remove_tray_icon(hwnd);
+            app.release_gdi_resources();
             PostQuitMessage(0);
             0
         }

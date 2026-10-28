@@ -187,8 +187,24 @@ public:
         return S_OK;
     }
 
+    ULONG GetRefCount() const noexcept {
+        return static_cast<ULONG>(InterlockedCompareExchange(&ref_count_, 0, 0));
+    }
+
+    void EnsureCapacityAndReset(size_t capacity) {
+        if (buffer_.size() != capacity) {
+            buffer_.assign(capacity, 0);
+        }
+        actual_len_     = static_cast<LONG>(capacity);
+        has_time_       = false;
+        has_media_time_ = false;
+        sync_point_     = true;
+        preroll_        = false;
+        discontinuity_  = false;
+    }
+
 private:
-    volatile LONG        ref_count_ = 1;
+    mutable volatile LONG ref_count_ = 1;
     std::vector<uint8_t> buffer_;
     LONG                 actual_len_ = 0;
     REFERENCE_TIME       time_start_ = 0;
@@ -205,7 +221,9 @@ private:
 class SmartCamMemAllocator final : public IMemAllocator {
 public:
     SmartCamMemAllocator() = default;
-    ~SmartCamMemAllocator() = default;
+    ~SmartCamMemAllocator() {
+        ClearPoolLocked();
+    }
 
     STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override {
         if (!ppv) return E_POINTER;
@@ -228,7 +246,7 @@ public:
     STDMETHODIMP SetProperties(ALLOCATOR_PROPERTIES* pRequest, ALLOCATOR_PROPERTIES* pActual) override {
         if (!pRequest || !pActual) return E_POINTER;
         std::lock_guard<std::mutex> lock(mutex_);
-        props_.cBuffers = (pRequest->cBuffers > 0) ? pRequest->cBuffers : 4;
+        props_.cBuffers = (pRequest->cBuffers > 0) ? std::clamp<long>(pRequest->cBuffers, 1, 3) : 3;
         props_.cbBuffer = (pRequest->cbBuffer > 0) ? pRequest->cbBuffer : (1920 * 1080 * 4);
         props_.cbAlign  = (pRequest->cbAlign > 0) ? pRequest->cbAlign : 4;
         props_.cbPrefix = (pRequest->cbPrefix >= 0) ? pRequest->cbPrefix : 0;
@@ -246,12 +264,20 @@ public:
     STDMETHODIMP Commit() override {
         std::lock_guard<std::mutex> lock(mutex_);
         committed_ = true;
+        const size_t buf_size = static_cast<size_t>(props_.cbBuffer > 0 ? props_.cbBuffer : (1920 * 1080 * 4));
+        const size_t max_pool = static_cast<size_t>(std::clamp<long>(props_.cBuffers, 1, 3));
+        while (pool_.size() < max_pool) {
+            auto* s = new (std::nothrow) SmartCamMediaSample(buf_size);
+            if (!s) break;
+            pool_.push_back(s);
+        }
         return S_OK;
     }
 
     STDMETHODIMP Decommit() override {
         std::lock_guard<std::mutex> lock(mutex_);
         committed_ = false;
+        ClearPoolLocked();
         return S_OK;
     }
 
@@ -259,25 +285,50 @@ public:
                            REFERENCE_TIME* /*pEndTime*/, DWORD /*dwFlags*/) override {
         if (!ppBuffer) return E_POINTER;
         *ppBuffer = nullptr;
-        size_t buf_size = 0;
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (!committed_) return VFW_E_NOT_COMMITTED;
-            buf_size = static_cast<size_t>(props_.cbBuffer > 0 ? props_.cbBuffer : (1920 * 1080 * 4));
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!committed_) return VFW_E_NOT_COMMITTED;
+        const size_t buf_size = static_cast<size_t>(props_.cbBuffer > 0 ? props_.cbBuffer : (1920 * 1080 * 4));
+        const size_t max_pool = static_cast<size_t>(std::clamp<long>(props_.cBuffers, 1, 3));
+
+        // 1. Reuse an existing idle sample from the fixed-size pool (ref_count == 1 means only pool holds it)
+        for (SmartCamMediaSample* sample : pool_) {
+            if (sample && sample->GetRefCount() == 1) {
+                sample->EnsureCapacityAndReset(buf_size);
+                sample->AddRef();
+                *ppBuffer = sample;
+                return S_OK;
+            }
         }
-        auto* sample = new (std::nothrow) SmartCamMediaSample(buf_size);
-        if (!sample) return E_OUTOFMEMORY;
-        *ppBuffer = sample;
-        return S_OK;
+
+        // 2. Grow pool up to strict max_pool (max 3 frames) if not yet full
+        if (pool_.size() < max_pool) {
+            auto* sample = new (std::nothrow) SmartCamMediaSample(buf_size);
+            if (!sample) return E_OUTOFMEMORY;
+            sample->AddRef(); // 1 ref for pool_, 1 ref for caller
+            pool_.push_back(sample);
+            *ppBuffer = sample;
+            return S_OK;
+        }
+
+        // 3. Backpressure: all 3 pooled buffers are currently held downstream; drop frame rather than leaking VirtualAlloc
+        return VFW_E_TIMEOUT;
     }
 
     STDMETHODIMP ReleaseBuffer(IMediaSample* /*pBuffer*/) override { return S_OK; }
 
 private:
-    volatile LONG        ref_count_ = 1;
-    std::mutex           mutex_;
-    ALLOCATOR_PROPERTIES props_{4, 1920 * 1080 * 4, 4, 0};
-    bool                 committed_ = false;
+    void ClearPoolLocked() noexcept {
+        for (SmartCamMediaSample* s : pool_) {
+            if (s) s->Release();
+        }
+        pool_.clear();
+    }
+
+    volatile LONG                     ref_count_ = 1;
+    std::mutex                        mutex_;
+    ALLOCATOR_PROPERTIES              props_{3, 1920 * 1080 * 4, 4, 0};
+    std::vector<SmartCamMediaSample*> pool_;
+    bool                              committed_ = false;
 };
 
 // ============================================================================

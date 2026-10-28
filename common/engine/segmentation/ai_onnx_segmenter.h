@@ -225,6 +225,29 @@ private:
     std::vector<float>   prev_luma_map_;
     std::vector<float>   ref_bg_ycbcr_;
     std::vector<float>   ref_bg_raw_ycbcr_;
+    // Pre-allocated reusable per-frame scratch buffers to avoid VirtualAlloc/heap churn
+    std::vector<float>   bg_row_y_L_;
+    std::vector<float>   bg_row_cb_L_;
+    std::vector<float>   bg_row_cr_L_;
+    std::vector<float>   bg_row_y_R_;
+    std::vector<float>   bg_row_cb_R_;
+    std::vector<float>   bg_row_cr_R_;
+    std::vector<float>   bg_col_y_T_;
+    std::vector<float>   bg_col_cb_T_;
+    std::vector<float>   bg_col_cr_T_;
+    std::vector<float>   skin_map_;
+    std::vector<float>   luma_curr_;
+    std::vector<float>   bg_diff_map_;
+    std::vector<float>   feat_grad_map_;
+    std::vector<float>   sat_skin_buf_;
+    std::vector<float>   sat_grad_buf_;
+    std::vector<float>   sat_luma_buf_;
+    std::vector<float>   curr_ycbcr_;
+    std::vector<float>   raw_row_dy_;
+    std::vector<float>   row_dy_;
+    std::vector<float>   density_map_;
+    std::vector<int>     scan_left_;
+    std::vector<int>     scan_right_;
     FrameBuffer          lowres_mask_;
 
     struct OrtImpl;
