@@ -17,6 +17,7 @@
 //! Dynamically detects and initializes Vulkan, OpenCL, NVIDIA CUDA, AMD ROCm, and CPU SIMD
 //! with safe RAII handle management and zero compile-time vendor SDK dependencies.
 
+#[cfg(windows)]
 use std::ffi::CStr;
 use std::time::Instant;
 

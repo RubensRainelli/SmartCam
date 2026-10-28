@@ -28,7 +28,7 @@ LicenseFile=LICENSE
 SourceDir=..\..\..
 OutputDir=dist
 OutputBaseFilename=SmartCam-Setup-v2.0.0-x64
-SetupIconFile=assets\smartcam.ico
+SetupIconFile=assets\icons\smartcam.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
 Compression=lzma2/ultra64
@@ -60,8 +60,8 @@ Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.it.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\smartcam.ico"; Comment: "SmartCam Virtual Camera & AI Studio"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\smartcam.ico"; Tasks: desktopicon
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\icons\smartcam.ico"; Comment: "SmartCam Virtual Camera & AI Studio"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\icons\smartcam.ico"; Tasks: desktopicon
 
 [Registry]
 ; WinGet & Windows Installed Apps Metadata

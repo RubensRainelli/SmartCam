@@ -372,8 +372,8 @@ pub fn blend_bgra_neon(
                 let a2 = m2 + (m2 >> 7);
                 let a3 = m3 + (m3 >> 7);
 
-                let a_lo = uint16x8_t::from([a0, a0, a0, a0, a1, a1, a1, a1]);
-                let a_hi = uint16x8_t::from([a2, a2, a2, a2, a3, a3, a3, a3]);
+                let a_lo = vld1q_u16([a0, a0, a0, a0, a1, a1, a1, a1].as_ptr());
+                let a_hi = vld1q_u16([a2, a2, a2, a2, a3, a3, a3, a3].as_ptr());
 
                 let inv_lo = vsubq_u16(v_256, a_lo);
                 let inv_hi = vsubq_u16(v_256, a_hi);
@@ -395,7 +395,7 @@ pub fn blend_bgra_neon(
                 let mut packed = vcombine_u8(vqmovn_u16(res_lo), vqmovn_u16(res_hi));
                 // Set alpha channel to 255 for all 4 pixels
                 let alpha_mask =
-                    uint8x16_t::from([0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255]);
+                    vld1q_u8([0u8, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255].as_ptr());
                 packed = vorrq_u8(packed, alpha_mask);
 
                 vst1q_u8(out_row.add(px_off), packed);
