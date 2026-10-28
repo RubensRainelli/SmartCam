@@ -505,6 +505,52 @@ bool TestDynamicTrackingAndReferenceBackground() {
     return true;
 }
 
+bool TestFastNonAiMaskOnNarrowFrames() {
+    // The Fast Non-AI path samples one pixel in from each side border on every
+    // scanned row; frames narrower than 3 pixels must not index outside the row.
+    SmartCamEngineHandle engine = smartcam_engine_create(0);
+    if (!engine) return false;
+    if (!smartcam_engine_set_hardware_policy(engine, 1, 0, 0) || smartcam_engine_is_ai_enabled(engine) != 0) {
+        smartcam_engine_destroy(engine);
+        return false;
+    }
+
+    constexpr size_t kGuardBytes = 16;
+    const uint32_t widths[]  = {1, 2, 3, 4};
+    const uint32_t heights[] = {1, 2, 18, 36};
+    for (uint32_t w : widths) {
+        for (uint32_t h : heights) {
+            // Exactly-sized source so any read past the last pixel leaves the allocation.
+            std::vector<uint8_t> src(static_cast<size_t>(w) * h * 4);
+            for (size_t i = 0; i < src.size(); i += 4) {
+                src[i + 0] = 120;  // B
+                src[i + 1] = 140;  // G
+                src[i + 2] = 200;  // R
+                src[i + 3] = 255;  // A
+            }
+            std::vector<uint8_t> mask(static_cast<size_t>(w) * h + kGuardBytes, 0x5A);
+
+            const int ok = smartcam_engine_compute_ai_mask(engine, src.data(), w, h, w * 4, mask.data(), w);
+            if (ok != 1) {
+                std::fprintf(stderr, "[FAIL] Fast Non-AI mask rejected a valid %ux%u frame\n", w, h);
+                smartcam_engine_destroy(engine);
+                return false;
+            }
+            for (size_t i = static_cast<size_t>(w) * h; i < mask.size(); ++i) {
+                if (mask[i] != 0x5A) {
+                    std::fprintf(stderr, "[FAIL] Fast Non-AI mask wrote past a %ux%u mask (byte %zu)\n", w, h, i);
+                    smartcam_engine_destroy(engine);
+                    return false;
+                }
+            }
+        }
+    }
+
+    smartcam_engine_destroy(engine);
+    std::printf("[PASS] TestFastNonAiMaskOnNarrowFrames (widths 1..4 x heights 1..36, no out-of-row access)\n");
+    return true;
+}
+
 bool TestAntiLedTearingAndSpatialTolerance() {
     const uint32_t w = 256, h = 144;
     SmartCamEngineHandle engine = smartcam_engine_create(0);
@@ -1248,6 +1294,7 @@ int main() {
     ok &= TestSimdCompositorEquivalence();
     ok &= TestAiSegmenterPostProcess();
     ok &= TestDynamicTrackingAndReferenceBackground();
+    ok &= TestFastNonAiMaskOnNarrowFrames();
     ok &= TestAntiLedTearingAndSpatialTolerance();
     ok &= TestSolidSilhouetteWithColoredFurniture();
     ok &= TestWoodenStairsYellowHoodieZeroParallax();
