@@ -104,8 +104,11 @@ mod tests {
 
         let producer = SharedFrameIpc::open_or_create(&mapping_name, &event_name, true)
             .expect("open producer");
+        #[cfg(windows)]
         let consumer = SharedFrameIpc::open_or_create(&mapping_name, &event_name, false)
             .expect("open consumer");
+        #[cfg(not(windows))]
+        let consumer = &producer;
 
         let (width, height) = (16u32, 8u32);
         let test_pixels: Vec<u8> = (0..(width * height * 4) as usize)

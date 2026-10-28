@@ -87,6 +87,7 @@ extern "system" {
 
 /// Safe RAII wrapper around dynamically loaded shared libraries.
 pub struct SafeLibrary {
+    #[cfg_attr(not(windows), allow(dead_code))]
     handle: *mut std::ffi::c_void,
 }
 

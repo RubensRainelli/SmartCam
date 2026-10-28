@@ -98,7 +98,7 @@ pub fn run_linux_main() {
     let out_h = cfg.framing_output.output_height.max(480);
     let fps = cfg.camera_input.fps.max(15);
 
-    let mut camera = PlatformCamera::new();
+    let mut camera = PlatformCamera::default();
     let _ = camera.open(&CameraCaptureConfig {
         device_index: selected_cam,
         device_id: String::new(),
@@ -108,7 +108,7 @@ pub fn run_linux_main() {
         bit_depth: cfg.camera_input.bit_depth,
     });
 
-    let mut sink = PlatformSink::new();
+    let mut sink = PlatformSink::default();
     let _ = sink.initialize(&VirtualCameraSinkConfig {
         friendly_name: cfg.virtual_camera.friendly_name.clone(),
         shared_memory_name: cfg.virtual_camera.shared_memory_name.clone(),

@@ -53,8 +53,10 @@ jobs:
           $ErrorActionPreference = "Stop"
           $pfxPath = Join-Path $env:RUNNER_TEMP "cert.pfx"
           try {
-            $pfxBytes = [Convert]::FromBase64String($env:WINDOWS_PFX_BASE64.Trim())
+            $cleanB64 = ($env:WINDOWS_PFX_BASE64 -replace '[^A-Za-z0-9+/=]', '')
+            $pfxBytes = [Convert]::FromBase64String($cleanB64)
             [System.IO.File]::WriteAllBytes($pfxPath, $pfxBytes)
+            $cleanPwd = $env:WINDOWS_PFX_PASSWORD.Trim()
 
             $signtool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" |
               Where-Object { $_.FullName -match "\\x64\\signtool\.exe$" } |
@@ -65,10 +67,10 @@ jobs:
             }
             Write-Host "Using SignTool: $signtool"
 
-            & $signtool sign /f $pfxPath /p $env:WINDOWS_PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "target/release/SmartCam.exe"
+            & $signtool sign /f $pfxPath /p $cleanPwd /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "target/release/SmartCam.exe"
             if ($LASTEXITCODE -ne 0) { throw "Failed to sign SmartCam.exe" }
 
-            & $signtool sign /f $pfxPath /p $env:WINDOWS_PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "target/release/smartcam_mf_source.dll"
+            & $signtool sign /f $pfxPath /p $cleanPwd /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "target/release/smartcam_mf_source.dll"
             if ($LASTEXITCODE -ne 0) { throw "Failed to sign smartcam_mf_source.dll" }
 
             # Compile Inno Setup Installer
@@ -83,7 +85,7 @@ jobs:
             & $iscc "platforms/windows/installer/smartcam.iss"
             if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
 
-            & $signtool sign /f $pfxPath /p $env:WINDOWS_PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "dist/SmartCam-Setup-v2.0.0-x64.exe"
+            & $signtool sign /f $pfxPath /p $cleanPwd /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "dist/SmartCam-Setup-v2.0.0-x64.exe"
             if ($LASTEXITCODE -ne 0) { throw "Failed to sign SmartCam-Setup-v2.0.0-x64.exe" }
           } finally {
             if (Test-Path $pfxPath) {
@@ -154,17 +156,7 @@ jobs:
           cp -r assets "$DEB_ROOT/usr/share/smartcam/assets"
           cp config/default_config.yaml "$DEB_ROOT/usr/share/smartcam/config/default_config.yaml"
           cp LICENSE LICENSE.it NOTICE.md README.md README.it.md "$DEB_ROOT/usr/share/smartcam/"
-          cat > "$DEB_ROOT/DEBIAN/control" << 'EOF'
-          Package: smartcam
-          Version: 2.0.0
-          Section: video
-          Priority: optional
-          Architecture: amd64
-          Maintainer: Rubens Rainelli <rubens@rainelli.it>
-          Description: SmartCam v2.0.0 — Pure Rust AI Virtual Camera & Studio Compositor
-           High-performance 100% pure Rust Virtual Camera, background replacement,
-           blur, green screen, and wireless smartphone camera receiver.
-          EOF
+          printf "Package: smartcam\nVersion: 2.0.0\nSection: video\nPriority: optional\nArchitecture: amd64\nMaintainer: Rubens Rainelli <rubens@rainelli.it>\nDescription: SmartCam v2.0.0 — Pure Rust AI Virtual Camera & Studio Compositor\n High-performance 100%% pure Rust Virtual Camera, background replacement,\n blur, green screen, and wireless smartphone camera receiver.\n" > "$DEB_ROOT/DEBIAN/control"
           dpkg-deb --build "$DEB_ROOT" "dist/smartcam_2.0.0_amd64.deb"
 
       - name: Upload Linux Artifacts
@@ -207,32 +199,7 @@ jobs:
           cp -r assets dist/dmg/SmartCam.app/Contents/Resources/assets
           cp config/default_config.yaml dist/dmg/SmartCam.app/Contents/Resources/config/default_config.yaml
           cp LICENSE LICENSE.it NOTICE.md README.md README.it.md dist/dmg/SmartCam.app/Contents/Resources/
-          cat > dist/dmg/SmartCam.app/Contents/Info.plist << 'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>CFBundleExecutable</key>
-            <string>SmartCam</string>
-            <key>CFBundleIdentifier</key>
-            <string>it.rainelli.smartcam</string>
-            <key>CFBundleName</key>
-            <string>SmartCam</string>
-            <key>CFBundleDisplayName</key>
-            <string>SmartCam</string>
-            <key>CFBundlePackageType</key>
-            <string>APPL</string>
-            <key>CFBundleShortVersionString</key>
-            <string>2.0.0</string>
-            <key>CFBundleVersion</key>
-            <string>2.0.0</string>
-            <key>LSMinimumSystemVersion</key>
-            <string>11.0</string>
-            <key>NSCameraUsageDescription</key>
-            <string>SmartCam requires camera access to apply real-time AI background effects.</string>
-          </dict>
-          </plist>
-          EOF
+          printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleExecutable</key>\n  <string>SmartCam</string>\n  <key>CFBundleIdentifier</key>\n  <string>it.rainelli.smartcam</string>\n  <key>CFBundleName</key>\n  <string>SmartCam</string>\n  <key>CFBundleDisplayName</key>\n  <string>SmartCam</string>\n  <key>CFBundlePackageType</key>\n  <string>APPL</string>\n  <key>CFBundleShortVersionString</key>\n  <string>2.0.0</string>\n  <key>CFBundleVersion</key>\n  <string>2.0.0</string>\n  <key>LSMinimumSystemVersion</key>\n  <string>11.0</string>\n  <key>NSCameraUsageDescription</key>\n  <string>SmartCam requires camera access to apply real-time AI background effects.</string>\n</dict>\n</plist>\n' > dist/dmg/SmartCam.app/Contents/Info.plist
           codesign --force --deep --sign - dist/dmg/SmartCam.app
           hdiutil create -volname "SmartCam v2.0.0" -srcfolder dist/dmg -ov -format UDZO "dist/SmartCam-v2.0.0-macos-universal.dmg"
 
