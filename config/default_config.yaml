@@ -18,67 +18,67 @@ phone_camera_url: "http://192.168.1.120:8080"
 phone_camera_port: 8080
 
 camera_input:
-device_index: 0
-device_id: ""
-width: 1920
-height: 1080
-fps: 30
-bit_depth: 64             # 64 = 64-bit Deep Color (BGRA64 / 16-bit ch), 32 = 32-bit Standard (BGRA32 / 8-bit ch)
+  device_index: 0
+  device_id: ""
+  width: 1920
+  height: 1080
+  fps: 30
+  bit_depth: 64             # 64 = 64-bit Deep Color (BGRA64 / 16-bit ch), 32 = 32-bit Standard (BGRA32 / 8-bit ch)
 
 framing_output:
-aspect_ratio: "4:3"           # Options: "native", "16:9", "4:3", "1:1", "9:16", "custom"
-resolution_preset: "1080p"  # Options: "1080p", "900p", "720p", "540p", "480p", "360p", "240p"
-crop_strategy: "center_crop"  # Options: "center_crop", "letterbox"
-output_width: 1440
-output_height: 1080
+  aspect_ratio: "4:3"           # Options: "native", "16:9", "4:3", "1:1", "9:16", "custom"
+  resolution_preset: "1080p"  # Options: "1080p", "900p", "720p", "540p", "480p", "360p", "240p"
+  crop_strategy: "center_crop"  # Options: "center_crop", "letterbox"
+  output_width: 1440
+  output_height: 1080
 
 segmentation:
-mode: "passthrough"          # Options: "passthrough", "green_screen", "ai_selfie"
+  mode: "passthrough"          # Options: "passthrough", "green_screen", "ai_selfie"
 
-green_screen:
-hue_min: 35                 # HSV Hue lower bound [0..180]
-hue_max: 85                 # HSV Hue upper bound [0..180]
-sat_min: 45                 # HSV Saturation lower bound [0..255]
-sat_max: 255                # HSV Saturation upper bound [0..255]
-val_min: 40                 # HSV Value lower bound [0..255]
-val_max: 255                # HSV Value upper bound [0..255]
-morph_kernel_size: 3        # Morphological cleanup kernel (0 = off, 3 or 5)
-blur_radius: 2              # Soft-edge feathering radius in pixels
-spill_suppression: 0.35     # Green halo suppression on subject edges [0.0..1.0]
+  green_screen:
+    hue_min: 35                 # HSV Hue lower bound [0..180]
+    hue_max: 85                 # HSV Hue upper bound [0..180]
+    sat_min: 45                 # HSV Saturation lower bound [0..255]
+    sat_max: 255                # HSV Saturation upper bound [0..255]
+    val_min: 40                 # HSV Value lower bound [0..255]
+    val_max: 255                # HSV Value upper bound [0..255]
+    morph_kernel_size: 3        # Morphological cleanup kernel (0 = off, 3 or 5)
+    blur_radius: 2              # Soft-edge feathering radius in pixels
+    spill_suppression: 0.35     # Green halo suppression on subject edges [0.0..1.0]
 
-ai_selfie:
-ai_enabled: true
-model_path: "models/selfie_segmentation.onnx"
-input_width: 256
-input_height: 144
-confidence_threshold: 0.50
-temporal_smoothing: 0.25
-engine_mode: 0            # 0 = Auto/Ibrido, 1 = Sagoma & Volto AI, 2 = Differenza Sfondo (Telo Virtuale)
-bg_diff_tolerance: 0.50      # Tolleranza Luce/LED & Posizione [0.10..0.95]
-silhouette_mode: 0        # 0 = Volto + Busto, 1 = Solo Volto
-face_calibrated: false
-calib_skin_cb: 113.0
-calib_skin_cr: 148.0
-calib_head_rx: 0.105
-calib_head_ry: 0.175
-calib_landmarks: [0.450, 0.360, 0.550, 0.360, 0.500, 0.420, 0.500, 0.480, 0.500, 0.540]
-intra_op_threads: 2
-prefer_igpu_directml: true
+  ai_selfie:
+    ai_enabled: true
+    model_path: "models/selfie_segmentation.onnx"
+    input_width: 256
+    input_height: 144
+    confidence_threshold: 0.50
+    temporal_smoothing: 0.25
+    engine_mode: 0            # 0 = Auto/Ibrido, 1 = Sagoma & Volto AI, 2 = Differenza Sfondo (Telo Virtuale)
+    bg_diff_tolerance: 0.50      # Tolleranza Luce/LED & Posizione [0.10..0.95]
+    silhouette_mode: 0        # 0 = Volto + Busto, 1 = Solo Volto
+    face_calibrated: false
+    calib_skin_cb: 113.0
+    calib_skin_cr: 148.0
+    calib_head_rx: 0.105
+    calib_head_ry: 0.175
+    calib_landmarks: [0.450, 0.360, 0.550, 0.360, 0.500, 0.420, 0.500, 0.480, 0.500, 0.540]
+    intra_op_threads: 2
+    prefer_igpu_directml: true
 
 compositor:
-compute_backend: "auto" # Options: "auto", "cpu", "vulkan", "opencl", "cuda", "rocm"
-simd_acceleration: "auto"     # Options: "auto", "avx512", "avx2", "scalar"
-background_mode: "image" # Options: "solid_color", "image", "blur"
-background_color_rgb: [24, 34, 56]
-background_image_path: "assets/backgrounds/preset_1_studio_blue.jpg"
-background_blur_radius: 15
-background_zoom: 1.00
-background_pan_x: 0.500
-background_pan_y: 0.500
-background_mirror_h: false       # Specchia lo sfondo in orizzontale (utile per app che specchiano la webcam)
-background_mirror_v: false       # Specchia lo sfondo in verticale
+  compute_backend: "auto" # Options: "auto", "cpu", "vulkan", "opencl", "cuda", "rocm"
+  simd_acceleration: "auto"     # Options: "auto", "avx512", "avx2", "scalar"
+  background_mode: "image" # Options: "solid_color", "image", "blur"
+  background_color_rgb: [24, 34, 56]
+  background_image_path: "assets/backgrounds/preset_1_studio_blue.jpg"
+  background_blur_radius: 15
+  background_zoom: 1.00
+  background_pan_x: 0.500
+  background_pan_y: 0.500
+  background_mirror_h: false       # Specchia lo sfondo in orizzontale (utile per app che specchiano la webcam)
+  background_mirror_v: false       # Specchia lo sfondo in verticale
 
 virtual_camera:
-friendly_name: "SmartCam"
-backend: "media_foundation"   # Windows 11 native Media Foundation Virtual Camera
-shared_memory_name: "Local\\SmartCam_MF_SharedFrame_v1"
+  friendly_name: "SmartCam"
+  backend: "media_foundation"   # Windows 11 native Media Foundation Virtual Camera
+  shared_memory_name: "Local\\SmartCam_MF_SharedFrame_v1"

@@ -782,70 +782,70 @@ phone_camera_url: \"{phone_url}\"\n\
 phone_camera_port: {phone_port}\n\
 \n\
 camera_input:\n\
-  device_index: {dev_idx}\n\
-  device_id: \"{dev_id}\"\n\
-  width: {in_w}\n\
-  height: {in_h}\n\
-  fps: {fps}\n\
-  bit_depth: {bit_depth}             # 64 = 64-bit Deep Color (BGRA64 / 16-bit ch), 32 = 32-bit Standard (BGRA32 / 8-bit ch)\n\
+\x20 device_index: {dev_idx}\n\
+\x20 device_id: \"{dev_id}\"\n\
+\x20 width: {in_w}\n\
+\x20 height: {in_h}\n\
+\x20 fps: {fps}\n\
+\x20 bit_depth: {bit_depth}             # 64 = 64-bit Deep Color (BGRA64 / 16-bit ch), 32 = 32-bit Standard (BGRA32 / 8-bit ch)\n\
 \n\
 framing_output:\n\
-  aspect_ratio: \"{ar}\"           # Options: \"native\", \"16:9\", \"4:3\", \"1:1\", \"9:16\", \"custom\"\n\
-  resolution_preset: \"{res_preset}\"  # Options: \"1080p\", \"900p\", \"720p\", \"540p\", \"480p\", \"360p\", \"240p\"\n\
-  crop_strategy: \"{cs}\"  # Options: \"center_crop\", \"letterbox\"\n\
-  output_width: {out_w}\n\
-  output_height: {out_h}\n\
+\x20 aspect_ratio: \"{ar}\"           # Options: \"native\", \"16:9\", \"4:3\", \"1:1\", \"9:16\", \"custom\"\n\
+\x20 resolution_preset: \"{res_preset}\"  # Options: \"1080p\", \"900p\", \"720p\", \"540p\", \"480p\", \"360p\", \"240p\"\n\
+\x20 crop_strategy: \"{cs}\"  # Options: \"center_crop\", \"letterbox\"\n\
+\x20 output_width: {out_w}\n\
+\x20 output_height: {out_h}\n\
 \n\
 segmentation:\n\
-  mode: \"{mode}\"          # Options: \"passthrough\", \"green_screen\", \"ai_selfie\"\n\
+\x20 mode: \"{mode}\"          # Options: \"passthrough\", \"green_screen\", \"ai_selfie\"\n\
 \n\
-  green_screen:\n\
-    hue_min: {hmin}                 # HSV Hue lower bound [0..180]\n\
-    hue_max: {hmax}                 # HSV Hue upper bound [0..180]\n\
-    sat_min: {smin}                 # HSV Saturation lower bound [0..255]\n\
-    sat_max: {smax}                # HSV Saturation upper bound [0..255]\n\
-    val_min: {vmin}                 # HSV Value lower bound [0..255]\n\
-    val_max: {vmax}                # HSV Value upper bound [0..255]\n\
-    morph_kernel_size: {morph}        # Morphological cleanup kernel (0 = off, 3 or 5)\n\
-    blur_radius: {blur}              # Soft-edge feathering radius in pixels\n\
-    spill_suppression: {spill:.2}     # Green halo suppression on subject edges [0.0..1.0]\n\
+\x20 green_screen:\n\
+\x20   hue_min: {hmin}                 # HSV Hue lower bound [0..180]\n\
+\x20   hue_max: {hmax}                 # HSV Hue upper bound [0..180]\n\
+\x20   sat_min: {smin}                 # HSV Saturation lower bound [0..255]\n\
+\x20   sat_max: {smax}                # HSV Saturation upper bound [0..255]\n\
+\x20   val_min: {vmin}                 # HSV Value lower bound [0..255]\n\
+\x20   val_max: {vmax}                # HSV Value upper bound [0..255]\n\
+\x20   morph_kernel_size: {morph}        # Morphological cleanup kernel (0 = off, 3 or 5)\n\
+\x20   blur_radius: {blur}              # Soft-edge feathering radius in pixels\n\
+\x20   spill_suppression: {spill:.2}     # Green halo suppression on subject edges [0.0..1.0]\n\
 \n\
-  ai_selfie:\n\
-    ai_enabled: {ai_enabled}\n\
-    model_path: \"{model}\"\n\
-    input_width: {ai_w}\n\
-    input_height: {ai_h}\n\
-    confidence_threshold: {ai_conf:.2}\n\
-    temporal_smoothing: {ai_smooth:.2}\n\
-    engine_mode: {ai_mode}            # 0 = Auto/Ibrido, 1 = Sagoma & Volto AI, 2 = Differenza Sfondo (Telo Virtuale)\n\
-    bg_diff_tolerance: {ai_tol:.2}      # Tolleranza Luce/LED & Posizione [0.10..0.95]\n\
-    silhouette_mode: {sil_mode}        # 0 = Volto + Busto, 1 = Solo Volto\n\
-    face_calibrated: {face_cal}\n\
-    calib_skin_cb: {cal_cb:.1}\n\
-    calib_skin_cr: {cal_cr:.1}\n\
-    calib_head_rx: {cal_rx:.3}\n\
-    calib_head_ry: {cal_ry:.3}\n\
-    calib_landmarks: {lm_yaml}\n\
-    intra_op_threads: {ai_threads}\n\
-    prefer_igpu_directml: {ai_igpu}\n\
+\x20 ai_selfie:\n\
+\x20   ai_enabled: {ai_enabled}\n\
+\x20   model_path: \"{model}\"\n\
+\x20   input_width: {ai_w}\n\
+\x20   input_height: {ai_h}\n\
+\x20   confidence_threshold: {ai_conf:.2}\n\
+\x20   temporal_smoothing: {ai_smooth:.2}\n\
+\x20   engine_mode: {ai_mode}            # 0 = Auto/Ibrido, 1 = Sagoma & Volto AI, 2 = Differenza Sfondo (Telo Virtuale)\n\
+\x20   bg_diff_tolerance: {ai_tol:.2}      # Tolleranza Luce/LED & Posizione [0.10..0.95]\n\
+\x20   silhouette_mode: {sil_mode}        # 0 = Volto + Busto, 1 = Solo Volto\n\
+\x20   face_calibrated: {face_cal}\n\
+\x20   calib_skin_cb: {cal_cb:.1}\n\
+\x20   calib_skin_cr: {cal_cr:.1}\n\
+\x20   calib_head_rx: {cal_rx:.3}\n\
+\x20   calib_head_ry: {cal_ry:.3}\n\
+\x20   calib_landmarks: {lm_yaml}\n\
+\x20   intra_op_threads: {ai_threads}\n\
+\x20   prefer_igpu_directml: {ai_igpu}\n\
 \n\
 compositor:\n\
-  compute_backend: \"{compute_backend}\" # Options: \"auto\", \"cpu\", \"vulkan\", \"opencl\", \"cuda\", \"rocm\"\n\
-  simd_acceleration: \"{simd}\"     # Options: \"auto\", \"avx512\", \"avx2\", \"scalar\"\n\
-  background_mode: \"{bg_mode}\" # Options: \"solid_color\", \"image\", \"blur\"\n\
-  background_color_rgb: [{r}, {g}, {b}]\n\
-  background_image_path: \"{bg_img}\"\n\
-  background_blur_radius: {bg_blur}\n\
-  background_zoom: {bg_zoom:.2}\n\
-  background_pan_x: {bg_px:.3}\n\
-  background_pan_y: {bg_py:.3}\n\
-  background_mirror_h: {bg_mir_h}       # Specchia lo sfondo in orizzontale (utile per app che specchiano la webcam)\n\
-  background_mirror_v: {bg_mir_v}       # Specchia lo sfondo in verticale\n\
+\x20 compute_backend: \"{compute_backend}\" # Options: \"auto\", \"cpu\", \"vulkan\", \"opencl\", \"cuda\", \"rocm\"\n\
+\x20 simd_acceleration: \"{simd}\"     # Options: \"auto\", \"avx512\", \"avx2\", \"scalar\"\n\
+\x20 background_mode: \"{bg_mode}\" # Options: \"solid_color\", \"image\", \"blur\"\n\
+\x20 background_color_rgb: [{r}, {g}, {b}]\n\
+\x20 background_image_path: \"{bg_img}\"\n\
+\x20 background_blur_radius: {bg_blur}\n\
+\x20 background_zoom: {bg_zoom:.2}\n\
+\x20 background_pan_x: {bg_px:.3}\n\
+\x20 background_pan_y: {bg_py:.3}\n\
+\x20 background_mirror_h: {bg_mir_h}       # Specchia lo sfondo in orizzontale (utile per app che specchiano la webcam)\n\
+\x20 background_mirror_v: {bg_mir_v}       # Specchia lo sfondo in verticale\n\
 \n\
 virtual_camera:\n\
-  friendly_name: \"{vcam_name}\"\n\
-  backend: \"{vcam_backend}\"   # Windows 11 native Media Foundation Virtual Camera\n\
-  shared_memory_name: \"{shm}\"\n",
+\x20 friendly_name: \"{vcam_name}\"\n\
+\x20 backend: \"{vcam_backend}\"   # Windows 11 native Media Foundation Virtual Camera\n\
+\x20 shared_memory_name: \"{shm}\"\n",
             header = PEFL_YAML_HEADER.trim_end(),
             icon_theme = self.app_icon_theme,
             compute_backend = self.compute_backend,
@@ -959,7 +959,8 @@ fn strip_yaml_comment(line: &str) -> String {
 
 fn clean_scalar(val: &str) -> String {
     let v = val.trim();
-    if (v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\'')) {
+    // len >= 2: a lone `"` or `'` both starts and ends with the quote but has nothing to strip
+    if v.len() >= 2 && ((v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\''))) {
         v[1..v.len() - 1].replace("\\\\", "\\")
     } else {
         v.to_string()
@@ -1024,4 +1025,103 @@ pub fn resolve_repo_root() -> PathBuf {
         }
     }
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_yaml_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("smartcam_config_test_{}_{}.yaml", name, std::process::id()))
+    }
+
+    #[test]
+    fn save_then_load_round_trips_nested_settings() {
+        let mut cfg = SmartCamConfig::default();
+        cfg.camera_input.device_index = 3;
+        cfg.camera_input.fps = 60;
+        cfg.framing_output.aspect_ratio = "16:9".to_string();
+        cfg.framing_output.crop_strategy = "letterbox".to_string();
+        cfg.segmentation.mode = "green_screen".to_string();
+        cfg.segmentation.green_screen.hue_min = 50;
+        cfg.segmentation.green_screen.blur_radius = 7;
+        cfg.segmentation.ai_selfie.engine_mode = 2;
+        cfg.segmentation.ai_selfie.silhouette_mode = 1;
+        cfg.compositor.background_mode = "blur".to_string();
+        cfg.compositor.background_blur_radius = 30;
+        cfg.compositor.background_mirror_h = true;
+        cfg.virtual_camera.friendly_name = "Studio Cam".to_string();
+
+        let path = temp_yaml_path("round_trip");
+        cfg.save_to_file(&path).expect("save_to_file");
+        let loaded = SmartCamConfig::load_from_file(&path);
+        let _ = fs::remove_file(&path);
+
+        assert_eq!(loaded.camera_input.device_index, 3);
+        assert_eq!(loaded.camera_input.fps, 60);
+        assert_eq!(loaded.framing_output.aspect_ratio, "16:9");
+        assert_eq!(loaded.framing_output.crop_strategy, "letterbox");
+        assert_eq!(loaded.segmentation.mode, "green_screen");
+        assert_eq!(loaded.segmentation.green_screen.hue_min, 50);
+        assert_eq!(loaded.segmentation.green_screen.blur_radius, 7);
+        assert_eq!(loaded.segmentation.ai_selfie.engine_mode, 2);
+        assert_eq!(loaded.segmentation.ai_selfie.silhouette_mode, 1);
+        assert_eq!(loaded.compositor.background_mode, "blur");
+        assert_eq!(loaded.compositor.background_blur_radius, 30);
+        assert!(loaded.compositor.background_mirror_h);
+        assert_eq!(loaded.virtual_camera.friendly_name, "Studio Cam");
+    }
+
+    #[test]
+    fn saved_yaml_keeps_section_indentation() {
+        let mut cfg = SmartCamConfig::default();
+        let path = temp_yaml_path("indentation");
+        cfg.save_to_file(&path).expect("save_to_file");
+        let yaml = fs::read_to_string(&path).expect("read saved yaml");
+        let _ = fs::remove_file(&path);
+
+        assert!(yaml.contains("\ncamera_input:\n  device_index: 0\n"), "{yaml}");
+        assert!(yaml.contains("\nsegmentation:\n  mode: \"ai_selfie\""), "{yaml}");
+        assert!(yaml.contains("\n  green_screen:\n    hue_min: 35 "), "{yaml}");
+        assert!(yaml.contains("\n  ai_selfie:\n    ai_enabled: true\n"), "{yaml}");
+        assert!(yaml.contains("\ncompositor:\n  compute_backend: \"auto\""), "{yaml}");
+        assert!(yaml.contains("\nvirtual_camera:\n  friendly_name: \"SmartCam\"\n"), "{yaml}");
+    }
+
+    #[test]
+    fn shipped_default_config_is_read_back_as_written() {
+        let shipped = include_str!("../../config/default_config.yaml").replace('\r', "");
+        let path = temp_yaml_path("shipped_default");
+        fs::write(&path, &shipped).expect("write shipped default copy");
+        let mut cfg = SmartCamConfig::load_from_file(&path);
+
+        // Nested value that differs from SmartCamConfig::default() ("ai_selfie").
+        assert_eq!(cfg.segmentation.mode, "passthrough");
+
+        cfg.save_to_file(&path).expect("save_to_file");
+        let resaved = fs::read_to_string(&path).expect("read resaved yaml").replace('\r', "");
+        let _ = fs::remove_file(&path);
+        assert_eq!(resaved, shipped, "config/default_config.yaml is not in the format save_to_file writes");
+    }
+
+    #[test]
+    fn clean_scalar_keeps_a_lone_quote_character() {
+        assert_eq!(clean_scalar("\""), "\"");
+        assert_eq!(clean_scalar("'"), "'");
+        assert_eq!(clean_scalar("\"\""), "");
+        assert_eq!(clean_scalar("''"), "");
+        assert_eq!(clean_scalar(" \"cam 1\" "), "cam 1");
+    }
+
+    #[test]
+    fn load_from_file_survives_a_lone_quote_value() {
+        let path = temp_yaml_path("lone_quote");
+        fs::write(&path, "camera_input:\n  device_id: \"\n  fps: 25\nenabled_plugins:\n  - '\n").expect("write yaml");
+        let cfg = SmartCamConfig::load_from_file(&path);
+        let _ = fs::remove_file(&path);
+
+        assert_eq!(cfg.camera_input.device_id, "\"");
+        assert_eq!(cfg.camera_input.fps, 25);
+        assert_eq!(cfg.enabled_plugins, vec!["'".to_string()]);
+    }
 }
