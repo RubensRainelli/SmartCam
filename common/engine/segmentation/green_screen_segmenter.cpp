@@ -212,6 +212,10 @@ void GreenScreenSegmenter::SuppressGreenSpill(FrameView& frame, const FrameView&
     if (frame.width != mask.width || frame.height != mask.height) {
         return;
     }
+    if ((frame.format != PixelFormat::BGRA32 && frame.format != PixelFormat::RGBA32) ||
+        mask.format != PixelFormat::GRAY8) {
+        return;
+    }
 
     const bool is_bgra = (frame.format == PixelFormat::BGRA32);
     const uint32_t strength_fp = static_cast<uint32_t>(std::clamp(config_.spill_suppression, 0.0f, 1.0f) * 256.0f);

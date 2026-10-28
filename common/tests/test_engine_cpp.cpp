@@ -330,6 +330,67 @@ bool TestGreenScreenAutoCalibration() {
     return true;
 }
 
+bool TestGreenSpillSuppressionPixelFormats() {
+    GreenScreenSegmenter segmenter;  // default spill_suppression = 0.35 -> strength 89/256
+
+    // Supported: BGRA32 / RGBA32 frame + GRAY8 mask. G=200 over (R+B)/2=55 -> 200 - (145*89 >> 8) = 150.
+    for (PixelFormat fmt : {PixelFormat::BGRA32, PixelFormat::RGBA32}) {
+        std::vector<uint8_t> px(4 * 4);
+        for (size_t i = 0; i < px.size(); i += 4) {
+            px[i + 0] = 50; px[i + 1] = 200; px[i + 2] = 60; px[i + 3] = 255;
+        }
+        std::vector<uint8_t> mask4(4, 255);
+        FrameView px_view{px.data(), 4, 1, 4 * 4, fmt, 0, 0};
+        FrameView mask4_view{mask4.data(), 4, 1, 4, PixelFormat::GRAY8, 0, 0};
+        segmenter.SuppressGreenSpill(px_view, mask4_view);
+        for (size_t i = 0; i < px.size(); i += 4) {
+            if (px[i + 0] != 50 || px[i + 1] != 150 || px[i + 2] != 60 || px[i + 3] != 255) {
+                std::fprintf(stderr, "[FAIL] %s spill suppression produced (%u,%u,%u,%u), expected (50,150,60,255)\n",
+                             fmt == PixelFormat::BGRA32 ? "BGRA32" : "RGBA32", px[i + 0], px[i + 1], px[i + 2], px[i + 3]);
+                return false;
+            }
+        }
+    }
+
+    // Unsupported layouts must be left untouched: the per-pixel loop assumes 4 bytes per pixel
+    // and an 8-bit GRAY8 mask. Each frame is followed by guard bytes inside the same allocation.
+    struct Case {
+        const char* name;
+        PixelFormat frame_format;
+        PixelFormat mask_format;
+    };
+    const Case cases[] = {
+        {"RGB24 frame", PixelFormat::RGB24, PixelFormat::GRAY8},
+        {"BGR24 frame", PixelFormat::BGR24, PixelFormat::GRAY8},
+        {"BGRA64 frame", PixelFormat::BGRA64, PixelFormat::GRAY8},
+        {"BGRA32 mask", PixelFormat::BGRA32, PixelFormat::BGRA32},
+    };
+    constexpr uint32_t kWidth = 16;
+    constexpr size_t kGuardBytes = 64;
+    for (const Case& c : cases) {
+        const uint32_t frame_stride = kWidth * GetBytesPerPixel(c.frame_format);
+        std::vector<uint8_t> frame(frame_stride + kGuardBytes);
+        for (size_t i = 0; i < frame.size(); ++i) {
+            frame[i] = (i % 3 == 1) ? 200 : 50;  // green-dominant bytes wherever G could be read
+        }
+        const std::vector<uint8_t> frame_before = frame;
+        const uint32_t mask_stride = kWidth * GetBytesPerPixel(c.mask_format);
+        std::vector<uint8_t> mask(mask_stride, 255);
+        FrameView frame_view{frame.data(), kWidth, 1, frame_stride, c.frame_format, 0, 0};
+        FrameView mask_view{mask.data(), kWidth, 1, mask_stride, c.mask_format, 0, 0};
+
+        segmenter.SuppressGreenSpill(frame_view, mask_view);
+
+        if (frame != frame_before) {
+            std::fprintf(stderr, "[FAIL] SuppressGreenSpill modified a %s it cannot process\n", c.name);
+            return false;
+        }
+    }
+
+    std::printf("[PASS] TestGreenSpillSuppressionPixelFormats (BGRA32+RGBA32 G 200->150, RGB24/BGR24/BGRA64/non-GRAY8 mask untouched)\n");
+    return true;
+}
+
 bool TestCApiContextIsolationAndHelpers() {
     const uint32_t w = 64, h = 64;
     SmartCamEngineHandle ctx_green = smartcam_engine_create(1);  // Scalar
@@ -1290,6 +1351,7 @@ int main() {
     ok &= TestCenterCrop16x9To4x3();
     ok &= TestGreenScreenHsvSegmentation();
     ok &= TestGreenScreenAutoCalibration();
+    ok &= TestGreenSpillSuppressionPixelFormats();
     ok &= TestCApiContextIsolationAndHelpers();
     ok &= TestSimdCompositorEquivalence();
     ok &= TestAiSegmenterPostProcess();
