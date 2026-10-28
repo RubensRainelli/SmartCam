@@ -157,7 +157,8 @@ echo "[3/4] Building Native Application (SmartCam)"
 echo "============================================================"
 export PATH="$HOME/.cargo/bin:$PATH"
 if command -v cargo >/dev/null 2>&1 && [[ -f "${REPO_ROOT}/app/Cargo.toml" ]]; then
-    (cd "${REPO_ROOT}/app" && cargo build --release) || true
+    (cd "${REPO_ROOT}/app" && cargo build --release) ||
+        echo "[SmartCam AppImage] WARNING: 'cargo build --release' failed; packaging a previous app/target/release/SmartCam if present, otherwise the CMake-built C++17 binary."
 else
     echo "[SmartCam AppImage] Using CMake-built native C++17 Linux binary (${BUILD_ROOT}/out_avx2/SmartCam)."
 fi

@@ -118,7 +118,7 @@ fn find_linux_engine_so(repo_root: &Path) -> Option<PathBuf> {
 pub fn run_linux_main() {
     let repo_root = resolve_repo_root();
     let cfg_path = repo_root.join("config").join("default_config.yaml");
-    let cfg = SmartCamConfig::load_or_default(&cfg_path);
+    let cfg = SmartCamConfig::load_from_file(&cfg_path);
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut max_frames: u64 = 0;
