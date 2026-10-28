@@ -32,6 +32,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build Pure Rust Workspace (Release)
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static"
         run: cargo build --release --workspace --target x86_64-pc-windows-msvc
 
       - name: Run Workspace Unit Tests
