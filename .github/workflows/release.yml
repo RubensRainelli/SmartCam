@@ -114,7 +114,7 @@ jobs:
             dist/SmartCam-v2.0.0-windows-x64-portable.zip
 
   build-linux:
-    name: Build & Package Linux x86_64 (.tar.gz & .deb)
+    name: Build & Package Linux x86_64 (.tar.gz, .deb & .AppImage)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -134,7 +134,7 @@ jobs:
       - name: Run Workspace Unit Tests
         run: cargo test --release --workspace --target x86_64-unknown-linux-gnu
 
-      - name: Package Linux .tar.gz and .deb
+      - name: Package Linux .tar.gz, .deb and .AppImage
         run: |
           mkdir -p dist
           STAGE_TAR="dist/smartcam-linux"
@@ -159,6 +159,38 @@ jobs:
           printf "Package: smartcam\nVersion: 2.0.0\nSection: video\nPriority: optional\nArchitecture: amd64\nMaintainer: Rubens Rainelli <rubens@rainelli.it>\nDescription: SmartCam v2.0.0 — Pure Rust AI Virtual Camera & Studio Compositor\n High-performance 100%% pure Rust Virtual Camera, background replacement,\n blur, green screen, and wireless smartphone camera receiver.\n" > "$DEB_ROOT/DEBIAN/control"
           dpkg-deb --build "$DEB_ROOT" "dist/smartcam_2.0.0_amd64.deb"
 
+          APPDIR="dist/appimage/SmartCam.AppDir"
+          mkdir -p "$APPDIR/usr/bin"
+          mkdir -p "$APPDIR/usr/share/smartcam/config"
+          cp target/x86_64-unknown-linux-gnu/release/SmartCam "$APPDIR/usr/bin/smartcam"
+          chmod 0755 "$APPDIR/usr/bin/smartcam"
+          cp -r assets "$APPDIR/usr/share/smartcam/assets"
+          cp config/default_config.yaml "$APPDIR/usr/share/smartcam/config/default_config.yaml"
+          cp LICENSE LICENSE.it NOTICE.md README.md README.it.md "$APPDIR/usr/share/smartcam/"
+          cp assets/icons/cyber_lens/icon_256x256.png "$APPDIR/smartcam.png"
+          cp assets/icons/cyber_lens/icon_256x256.png "$APPDIR/.DirIcon"
+          cat << 'EOF' > "$APPDIR/AppRun"
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          export SMARTCAM_DATA_DIR="${HERE}/usr/share/smartcam"
+          exec "${HERE}/usr/bin/smartcam" "$@"
+          EOF
+          chmod 0755 "$APPDIR/AppRun"
+          cat << 'EOF' > "$APPDIR/smartcam.desktop"
+          [Desktop Entry]
+          Type=Application
+          Name=SmartCam
+          Comment=Turn your webcam or smartphone into an AI studio camera
+          Exec=smartcam
+          Icon=smartcam
+          Categories=AudioVideo;Video;
+          Terminal=false
+          EOF
+          curl -fsSL -o appimagetool-x86_64.AppImage "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x appimagetool-x86_64.AppImage
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage --appimage-extract-and-run "$APPDIR" "dist/SmartCam-v2.0.0-x86_64.AppImage"
+          chmod +x "dist/SmartCam-v2.0.0-x86_64.AppImage"
+
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -166,6 +198,7 @@ jobs:
           path: |
             dist/SmartCam-v2.0.0-linux-x86_64.tar.gz
             dist/smartcam_2.0.0_amd64.deb
+            dist/SmartCam-v2.0.0-x86_64.AppImage
 
   build-macos:
     name: Build & Sign macOS Universal (.dmg)
@@ -231,7 +264,8 @@ jobs:
                     SmartCam-v2.0.0-windows-x64-portable.zip \
                     SmartCam-v2.0.0-macos-universal.dmg \
                     SmartCam-v2.0.0-linux-x86_64.tar.gz \
-                    smartcam_2.0.0_amd64.deb > SHA256SUMS.txt
+                    smartcam_2.0.0_amd64.deb \
+                    SmartCam-v2.0.0-x86_64.AppImage > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Create or Update GitHub Release

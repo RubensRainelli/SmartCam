@@ -18,7 +18,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#050508" />
-  <title>SMARTCAM // Cyberpunk Tactical Dashboard &amp; Virtual Camera Studio</title>
+  <meta name="description" content="SmartCam v2.0.0 — Turn your webcam or smartphone into a professional AI studio camera on Windows, macOS, and Linux. 100% offline, private, and ultra-lightweight." />
+  <title>SmartCam v2.0.0 // AI Virtual Studio Camera for Windows, macOS &amp; Linux</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&amp;family=Orbitron:wght@700;900&amp;family=Share+Tech+Mono&amp;display=swap" rel="stylesheet" />
@@ -52,12 +53,13 @@
   <!-- HEADER -->
   <header class="cyber-header">
     <div class="brand-wrap">
-      <span class="brand-title">SMARTCAM // v1.0</span>
-      <span class="sys-status">SYS_STATUS: ONLINE // AVX-512 + GPU</span>
+      <span class="brand-title">SMARTCAM // v2.0.0</span>
+      <span class="sys-status" id="sys-badge">WINDOWS &bull; MACOS &bull; LINUX // 100% OFFLINE</span>
     </div>
     <div class="header-controls">
       <button class="lang-toggle" onclick="toggleLanguage()" id="lang-btn">[ EN | IT ]</button>
       <button class="cyber-btn" onclick="openEulaModal(true)">[ PEFL v1.0 ]</button>
+      <a class="cyber-btn" href="https://rubensrainelli.github.io/rubens-rainelli-projects/rubensrainelli-projects.html" target="_blank" rel="noopener" id="hdr-projects-btn">🚀 MY OTHER PROJECTS</a>
       <a class="cyber-btn magenta" href="https://github.com/RubensRainelli/SmartCam" target="_blank" rel="noopener">GITHUB REPO</a>
     </div>
   </header>
@@ -66,17 +68,20 @@
     <!-- HERO SECTION -->
     <section class="hero-grid">
       <div>
-        <div class="hero-tag" id="hero-tag">NATIVE RUST + C++17 SIMD + MULTI-VENDOR GPU VIRTUAL CAMERA</div>
-        <h1 class="hero-title" id="hero-title">SMARTCAM VIRTUAL STUDIO</h1>
+        <div class="hero-tag" id="hero-tag">AI VIRTUAL STUDIO CAMERA // WINDOWS &bull; MACOS &bull; LINUX</div>
+        <h1 class="hero-title" id="hero-title">SMARTCAM VIRTUAL STUDIO v2.0</h1>
         <p class="hero-desc" id="hero-desc"></p>
         <div class="hero-actions">
-          <a class="cyber-btn green" href="https://github.com/RubensRainelli/SmartCam/raw/main/dist/SmartCam_Setup_v1.0.0_x64.exe">⬇ WIN11 INSTALLER (.EXE)</a>
-          <a class="cyber-btn" href="https://github.com/RubensRainelli/SmartCam/raw/main/dist/SmartCam_Portable_v1.0.0_x64.zip">⬇ WIN11 PORTABLE (.ZIP)</a>
-          <a class="cyber-btn magenta" href="https://github.com/RubensRainelli/SmartCam/raw/main/dist/SmartCam-v1.0.0-x86_64.AppImage">⬇ LINUX APPIMAGE (x86_64)</a>
+          <a class="cyber-btn green" href="https://github.com/RubensRainelli/SmartCam/releases/download/v2.0.0/SmartCam-Setup-v2.0.0-x64.exe">🪟 WINDOWS INSTALLER (.EXE)</a>
+          <a class="cyber-btn" href="https://github.com/RubensRainelli/SmartCam/releases/download/v2.0.0/SmartCam-v2.0.0-macos-universal.dmg">🍎 MACOS UNIVERSAL (.DMG)</a>
+          <a class="cyber-btn magenta" href="https://github.com/RubensRainelli/SmartCam/releases/download/v2.0.0/SmartCam-v2.0.0-x86_64.AppImage">🐧 LINUX APPIMAGE (x86_64)</a>
+          <a class="cyber-btn" href="https://github.com/RubensRainelli/SmartCam/releases/download/v2.0.0/smartcam_2.0.0_amd64.deb">🐧 UBUNTU / DEBIAN (.DEB)</a>
+          <a class="cyber-btn" href="https://github.com/RubensRainelli/SmartCam/releases/download/v2.0.0/SmartCam-v2.0.0-windows-x64-portable.zip">🪟 WIN PORTABLE (.ZIP)</a>
+          <a class="cyber-btn" href="https://github.com/RubensRainelli/SmartCam/releases/download/v2.0.0/SmartCam-v2.0.0-linux-x86_64.tar.gz">🐧 LINUX TARBALL (.TAR.GZ)</a>
         </div>
       </div>
       <div class="hero-svg-box">
-        <img src="./smartcam.svg" alt="SmartCam Cyberpunk Tactical Architecture SVG" />
+        <img src="./smartcam.svg" alt="SmartCam Studio Architecture SVG" />
       </div>
     </section>
 
@@ -84,32 +89,32 @@
     <section class="toolbar">
       <div class="terminal-input-wrap">
         <span class="terminal-prompt">&gt;</span>
-        <input type="text" id="search-input" class="terminal-input" placeholder="query_architecture_modules..." oninput="renderModules()" />
+        <input type="text" id="search-input" class="terminal-input" placeholder="search_features_or_platforms..." oninput="renderModules()" />
       </div>
       <div class="filter-group" id="filter-bar">
-        <button class="filter-btn active" onclick="setFilter('all', this)">ALL</button>
-        <button class="filter-btn" onclick="setFilter('engine', this)">SIMD &amp; GPU</button>
-        <button class="filter-btn" onclick="setFilter('ai', this)">5-PT AI TRACKING</button>
-        <button class="filter-btn" onclick="setFilter('mobile', this)">OLED SMARTPHONE</button>
-        <button class="filter-btn" onclick="setFilter('plugins', this)">PLUGINS &amp; LINUX</button>
+        <button class="filter-btn active" onclick="setFilter('all', this)" id="flt-all">ALL</button>
+        <button class="filter-btn" onclick="setFilter('studio', this)" id="flt-studio">BACKGROUND &amp; BLUR</button>
+        <button class="filter-btn" onclick="setFilter('mobile', this)" id="flt-mobile">SMARTPHONE WI-FI</button>
+        <button class="filter-btn" onclick="setFilter('platforms', this)" id="flt-platforms">WIN / MAC / LINUX</button>
+        <button class="filter-btn" onclick="setFilter('privacy', this)" id="flt-privacy">PRIVACY &amp; SPEED</button>
       </div>
     </section>
 
-    <!-- ARCHITECTURE & FEATURE CARDS -->
+    <!-- FEATURE CARDS -->
     <section class="cards-grid" id="cards-container"></section>
 
     <!-- LIVE DUAL-WEBCAM WEB TESTBENCH -->
     <section class="testbench-panel">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
         <div>
-          <div class="hero-tag">SIDE-BY-SIDE WEBRTC VERIFICATION</div>
-          <h2 class="card-title" id="tb-title">LIVE DUAL-CAMERA TESTBENCH (RAW UVC VS SMARTCAM)</h2>
+          <div class="hero-tag" id="tb-tag">INSTANT BROWSER CAMERA PREVIEW</div>
+          <h2 class="card-title" id="tb-title">LIVE DUAL-CAMERA TESTBENCH (PHYSICAL WEBCAM VS SMARTCAM)</h2>
         </div>
         <button class="cyber-btn green" onclick="startDualCameras()" id="btn-start-cam">▶ ACTIVATE WEBCAMS</button>
       </div>
       <div class="testbench-grid">
         <div class="cam-box">
-          <div class="card-meta"><span>CH_01 // PHYSICAL UVC SENSOR</span><span id="res-a">IDLE</span></div>
+          <div class="card-meta"><span>CH_01 // ORIGINAL WEBCAM</span><span id="res-a">IDLE</span></div>
           <select id="sel-cam-a" onchange="switchCam('a')"></select>
           <video id="vid-a" autoplay playsinline muted></video>
           <div id="ir-warn-a" class="ir-warning">⚠️ INFRARED (IR / WINDOWS HELLO) SENSOR DETECTED</div>
@@ -123,8 +128,25 @@
       </div>
     </section>
 
+    <!-- AUTHOR SHOWCASE & OTHER PROJECTS CALLOUT -->
+    <section class="testbench-panel" style="margin-top:28px;border-color:var(--neon-magenta);">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:18px;">
+        <div style="max-width:760px;">
+          <div class="hero-tag" id="creator-tag">CURIOUS ABOUT WHO BUILT SMARTCAM?</div>
+          <h2 class="card-title" id="creator-title">DISCOVER ALL PROJECTS BY RUBENS RAINELLI</h2>
+          <p class="hero-desc" id="creator-desc" style="margin-top:8px;margin-bottom:0;"></p>
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;">
+          <a class="cyber-btn green" href="https://rubensrainelli.github.io/rubens-rainelli-projects/rubensrainelli-projects.html" target="_blank" rel="noopener" id="btn-creator-portfolio">🚀 EXPLORE ALL MY PROJECTS</a>
+          <a class="cyber-btn magenta" href="https://github.com/RubensRainelli" target="_blank" rel="noopener">GITHUB @RUBENSRAINELLI</a>
+        </div>
+      </div>
+    </section>
+
     <footer class="footer">
-      SMARTCAM v1.0.0 // COPYRIGHT (C) 2026 RUBENS RAINELLI // LICENSED UNDER PEFL v1.0 (PERSONAL &amp; EDUCATIONAL FREE LICENSE)
+      SMARTCAM v2.0.0 // COPYRIGHT (C) 2026 RUBENS RAINELLI // LICENSED UNDER PEFL v1.0 &bull;
+      <a href="https://rubensrainelli.github.io/rubens-rainelli-projects/rubensrainelli-projects.html" target="_blank" rel="noopener" style="color:var(--neon-cyan);text-decoration:none;">ALL PROJECTS BY RUBENS RAINELLI</a> &bull;
+      <a href="https://github.com/RubensRainelli/SmartCam/blob/main/docs/ARCHITECTURE.md" target="_blank" rel="noopener" style="color:var(--neon-magenta);text-decoration:none;">TECHNICAL ARCHITECTURE (EN)</a>
     </footer>
   </main>
 

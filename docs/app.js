@@ -21,11 +21,23 @@ let currentFilter = 'all';
 
 const I18N = {
   en: {
-    heroTag: 'NATIVE RUST + C++17 SIMD + MULTI-VENDOR GPU VIRTUAL CAMERA',
-    heroTitle: 'SMARTCAM VIRTUAL STUDIO',
-    heroDesc: 'Zero-Python native virtual camera for Windows 11 (Media Foundation COM) and Linux (V4L2 + v4l2loopback AppImage). Features 5-Point Guided Face Template Tracking (NCC + 2D Kalman), AVX-512/AVX2 & Vulkan/OpenCL/CUDA/ROCm acceleration, 64-bit HDR source processing, and a single-port HTTPS :8080 OLED Smartphone Camera WebApp.',
-    tbTitle: 'LIVE DUAL-CAMERA TESTBENCH (RAW UVC VS SMARTCAM)',
+    sysBadge: 'WINDOWS • MACOS • LINUX // 100% OFFLINE & PRIVATE',
+    hdrProjectsBtn: '🚀 MY OTHER PROJECTS',
+    heroTag: 'AI VIRTUAL STUDIO CAMERA // WINDOWS • MACOS • LINUX',
+    heroTitle: 'SMARTCAM VIRTUAL STUDIO v2.0',
+    heroDesc: 'Turn your webcam or smartphone into a professional AI studio camera on Windows, macOS, and Linux. Blur or replace your background without a green screen, stream live HD video from your phone over Wi-Fi with a QR code (no phone app needed), and use SmartCam in Zoom, Microsoft Teams, Google Meet, Discord, and OBS Studio — 100% offline, private, and ultra-lightweight.',
+    fltAll: 'ALL',
+    fltStudio: 'BACKGROUND & BLUR',
+    fltMobile: 'SMARTPHONE WI-FI',
+    fltPlatforms: 'WIN / MAC / LINUX',
+    fltPrivacy: 'PRIVACY & SPEED',
+    tbTag: 'INSTANT BROWSER CAMERA PREVIEW',
+    tbTitle: 'LIVE DUAL-CAMERA TESTBENCH (PHYSICAL WEBCAM VS SMARTCAM)',
     btnStartCam: '▶ ACTIVATE WEBCAMS',
+    creatorTag: 'CURIOUS ABOUT WHO BUILT SMARTCAM?',
+    creatorTitle: 'DISCOVER ALL PROJECTS BY RUBENS RAINELLI',
+    creatorDesc: 'SmartCam is crafted with passion by Rubens Rainelli. Want to see what else I design and build? Explore my interactive showcase of software, AI tools, and creative engineering projects!',
+    btnCreatorPortfolio: '🚀 EXPLORE ALL MY PROJECTS',
     eulaTitle: 'PERSONAL AND EDUCATIONAL FREE LICENSE (PEFL v1.0)',
     btnAccept: 'ACCEPT PEFL v1.0 (7-DAY CACHE)',
     btnDecline: 'DECLINE',
@@ -42,11 +54,23 @@ Copyright (c) 2026 Rubens Rainelli (rubens@rainelli.it | https://github.com/Rube
    Explicit user acceptance is required before running the application and is cached locally for 7 days.`
   },
   it: {
-    heroTag: 'WEBCAM VIRTUALE NATIVA RUST + C++17 SIMD + GPU MULTI-VENDOR',
-    heroTitle: 'SMARTCAM VIRTUAL STUDIO',
-    heroDesc: 'Webcam virtuale 100% nativa (zero Python) per Windows 11 (Media Foundation COM) e Linux (V4L2 + v4l2loopback AppImage). Include Tracciamento Volto Calibrato a 5 Punti (NCC + Kalman 2D), accelerazione AVX-512/AVX2 e GPU Vulkan/OpenCL/CUDA/ROCm, pipeline HDR a 64-bit e WebApp Fotocamera Smartphone OLED su singola porta HTTPS :8080.',
-    tbTitle: 'TESTBENCH LIVE DOPPIA WEBCAM (UVC FISICA VS SMARTCAM)',
+    sysBadge: 'WINDOWS • MACOS • LINUX // 100% OFFLINE E PRIVATA',
+    hdrProjectsBtn: '🚀 I MIEI ALTRI PROGETTI',
+    heroTag: 'TELECAMERA STUDIO AI // WINDOWS • MACOS • LINUX',
+    heroTitle: 'SMARTCAM VIRTUAL STUDIO v2.0',
+    heroDesc: 'Trasforma la tua webcam o il tuo smartphone in una telecamera da studio professionale con AI su Windows, macOS e Linux. Sfoca o sostituisci lo sfondo senza telo verde, usa la fotocamera del telefono in Wi-Fi inquadrando un QR Code (senza installare app sul cellulare) e usa SmartCam su Zoom, Microsoft Teams, Google Meet, Discord e OBS Studio — 100% offline, privata e leggerissima.',
+    fltAll: 'TUTTI',
+    fltStudio: 'SFONDO & SFOCATURA',
+    fltMobile: 'SMARTPHONE WI-FI',
+    fltPlatforms: 'WIN / MAC / LINUX',
+    fltPrivacy: 'PRIVACY & VELOCITÀ',
+    tbTag: 'ANTEPRIMA IMMEDIATA NEL BROWSER',
+    tbTitle: 'TESTBENCH LIVE DOPPIA WEBCAM (WEBCAM FISICA VS SMARTCAM)',
     btnStartCam: '▶ ATTIVA LE 2 WEBCAM',
+    creatorTag: 'CURIOSO DI SCOPRIRE CHI HA CREATO SMARTCAM?',
+    creatorTitle: 'SCOPRI TUTTI GLI ALTRI PROGETTI DI RUBENS RAINELLI',
+    creatorDesc: 'SmartCam è sviluppata con passione da Rubens Rainelli. Vuoi scoprire chi sono e quali altri progetti, strumenti AI e applicazioni ho realizzato? Visita la vetrina interattiva con tutti i miei lavori!',
+    btnCreatorPortfolio: '🚀 SCOPRI TUTTI I MIEI PROGETTI',
     eulaTitle: 'LICENZA GRATUITA PERSONALE E DIDATTICA (PEFL v1.0)',
     btnAccept: 'ACCETTO LA LICENZA PEFL v1.0 (7 GIORNI)',
     btnDecline: 'RIFIUTO',
@@ -66,82 +90,82 @@ Copyright (c) 2026 Rubens Rainelli (rubens@rainelli.it | https://github.com/Rube
 
 const MODULES = [
   {
-    id: 'ID: 001',
-    cat: 'ai',
+    id: '01 // STUDIO',
+    cat: 'studio',
     title: {
-      en: '5-Point Guided Face Template Tracker',
-      it: 'Tracciamento Volto Guidato a 5 Punti'
+      en: 'Background Blur & Custom Studio Scenes',
+      it: 'Sfondo Sfocato e Ambienti Studio Personalizzati'
     },
     desc: {
-      en: 'Interactive snapshot calibration (Right Eye, Left Eye, Nose Tip, Lips, Chin) with Z-Score normalized 32x32 YCbCr template matching (NCC) and 2D Kalman filtering. Supports Face + Upper Body or Face Only cutout.',
-      it: 'Calibrazione guidata su foto (Occhio Destro, Occhio Sinistro, Punta del Naso, Labbra, Mento) con template matching fotometrico Z-Score 32x32 (NCC) e filtro di Kalman 2D. Supporta Volto + Busto o Solo Volto.'
+      en: 'Hide a messy room with natural portrait blur, pick from built-in executive office scenes, upload your own photos, or use a physical Green Screen with automatic one-click color calibration.',
+      it: 'Nascondi il disordine della stanza con una sfocatura ritratto naturale, scegli tra gli sfondi da ufficio inclusi, carica le tue foto o usa un telo verde con calibrazione automatica in un clic.'
     },
-    tags: ['NCC PYRAMID', 'KALMAN 2D', 'ZERO PARALLAX']
+    tags: ['PORTRAIT BLUR', 'CUSTOM PHOTO', 'AUTO GREEN SCREEN']
   },
   {
-    id: 'ID: 002',
+    id: '02 // MOBILE',
     cat: 'mobile',
     title: {
-      en: 'OLED Smartphone Camera (HTTPS :8080)',
-      it: 'Fotocamera Smartphone OLED (HTTPS :8080)'
+      en: 'Smartphone as Wireless HD Webcam (Zero App)',
+      it: 'Smartphone come Webcam HD Wi-Fi (Zero App)'
     },
     desc: {
-      en: 'Single-port HTTP/HTTPS multiplexer on port 8080 unlocks mobile browser camera permissions automatically. Features multi-lens dropdown, native 1:1 sensor aspect ratio, FPS & bandwidth scaler, Wake Lock anti-standby, and 0.00% APL pure black fullscreen saver (2-tap or swipe back).',
-      it: 'Multiplexer HTTP/HTTPS sulla stessa porta 8080 per sbloccare il permesso fotocamera mobile. Include selettore obiettivi multipli, proporzioni 1:1 native del sensore, scala banda e FPS, anti-standby Wake Lock e schermo nero fullscreen OLED a zero scritte (2 tap o swipe indietro).'
+      en: 'Scan the QR code displayed inside SmartCam with your iPhone or Android camera to stream crystal-clear HD video over your home Wi-Fi. No app installation required on your phone, complete with OLED battery-saver mode.',
+      it: 'Inquadra il QR Code mostrato in SmartCam con la fotocamera del tuo iPhone o Android per trasmettere video HD tramite il Wi-Fi di casa. Nessuna app da installare sul telefono e modalità risparmio OLED inclusa.'
     },
-    tags: ['HTTPS :8080', '0% APL OLED', 'WAKE LOCK']
+    tags: ['QR CODE WI-FI', 'NO PHONE APP', 'OLED SAVER']
   },
   {
-    id: 'ID: 003',
-    cat: 'engine',
+    id: '03 // PLATFORMS',
+    cat: 'platforms',
     title: {
-      en: 'AVX-512 / AVX2 SIMD & Multi-Vendor GPU',
-      it: 'SIMD AVX-512 / AVX2 & GPU Multi-Vendor'
+      en: 'Native on Windows, macOS & Linux',
+      it: 'Nativa su Windows, macOS e Linux'
     },
     desc: {
-      en: 'Dynamic runtime dispatch across CPU (AVX-512, AVX2, Scalar) and GPU (Vulkan, OpenCL, NVIDIA CUDA, AMD ROCm/HIP) with real hardware pipeline benchmarking and hardware fingerprint caching.',
-      it: 'Dispatch dinamico a runtime su CPU (AVX-512, AVX2, Scalare) e GPU (Vulkan, OpenCL, NVIDIA CUDA, AMD ROCm/HIP) con benchmark reale della pipeline e memorizzazione per fingerprint hardware.'
+      en: 'Ready-to-run installers for everyone: Windows 10/11 (.exe installer, portable .zip, or WinGet), macOS Universal (.dmg for Apple Silicon M1–M4 & Intel), and Linux (portable .AppImage, Ubuntu/Debian .deb, and .tar.gz).',
+      it: 'Pacchetti pronti per ogni sistema: Windows 10/11 (installer .exe, .zip portatile o WinGet), macOS Universal (.dmg per Apple Silicon M1–M4 e Intel) e Linux (.AppImage universale, .deb per Ubuntu/Debian e .tar.gz).'
     },
-    tags: ['AVX-512', 'VULKAN / CUDA', 'REAL BENCHMARK']
+    tags: ['WINDOWS 10/11', 'MACOS UNIVERSAL', 'LINUX APPIMAGE & DEB']
   },
   {
-    id: 'ID: 004',
-    cat: 'engine',
+    id: '04 // APPS',
+    cat: 'platforms',
     title: {
-      en: '64-Bit Deep Color HDR & Mirror Background',
-      it: 'Sorgente 64-Bit HDR & Specchiatura Sfondo'
+      en: 'Works Instantly with Zoom, Teams, Meet & OBS',
+      it: 'Subito Pronta su Zoom, Teams, Meet e OBS'
     },
     desc: {
-      en: 'Selectable 32-bit (BGRA32) or 64-bit (BGRA64 16-bit per channel) source pipeline with 12-bit fixed-point YCbCr chroma conversion, plus horizontal/vertical background mirroring for apps that mirror webcams.',
-      it: 'Pipeline sorgente selezionabile a 32-bit (BGRA32) o 64-bit (BGRA64 16-bit per canale) con conversione cromatica a 12-bit ed opzione di specchiatura orizzontale/verticale dello sfondo.'
+      en: 'Appears directly as the "SmartCam" camera inside Zoom, Microsoft Teams, Google Meet, Discord, Skype, OBS Studio, and modern web browsers (Chrome, Edge, Firefox, Safari).',
+      it: 'Compare direttamente come fotocamera "SmartCam" dentro Zoom, Microsoft Teams, Google Meet, Discord, Skype, OBS Studio e in tutti i browser moderni (Chrome, Edge, Firefox, Safari).'
     },
-    tags: ['64-BIT BGRA64', 'MIRROR H/V', 'SOCIAL CROP']
+    tags: ['ZOOM & TEAMS', 'GOOGLE MEET', 'DISCORD & OBS']
   },
   {
-    id: 'ID: 005',
-    cat: 'plugins',
+    id: '05 // FRAMING',
+    cat: 'studio',
     title: {
-      en: 'Modular Plugin System & Multi-Person AI',
-      it: 'Sistema Plugin Modulare & Multi-Persona'
+      en: 'Smart Framing, Social Formats & Mirroring',
+      it: 'Inquadratura Intelligente, Formati Social e Specchio'
     },
     desc: {
-      en: 'C ABI v1 plugin architecture (`how-to-make-a-plugin.md`) with built-in Smartphone Camera, Multi-Person Tracker (up to 4 simultaneous subjects), Studio Color & Denoise Enhancer, Teleprompter, and WebRTC/RTSP.',
-      it: 'Architettura plugin C ABI v1 (`how-to-make-a-plugin.md`) con Fotocamera Smartphone, Tracking Persone Multiple (fino a 4 soggetti), Ottimizzatore Luce/Colore Studio, Teleprompter e WebRTC/RTSP.'
+      en: 'Switch effortlessly between Widescreen (16:9), Classic (4:3), Square (1:1), and Vertical Social (9:16 for TikTok/Reels/Shorts), with independent horizontal and vertical background mirroring.',
+      it: 'Passa in un clic tra formato Widescreen (16:9), Classico (4:3), Quadrato (1:1) e Verticale Social (9:16 per TikTok/Reels/Shorts), con specchiatura indipendente dello sfondo.'
     },
-    tags: ['PLUGIN ABI V1', 'MULTI-PERSON x4', 'STUDIO LUT']
+    tags: ['16:9 / 9:16 / 1:1', 'AUTO FRAMING', 'MIRROR H/V']
   },
   {
-    id: 'ID: 006',
-    cat: 'plugins',
+    id: '06 // PRIVACY',
+    cat: 'privacy',
     title: {
-      en: 'Windows 11 COM & Linux V4L2 AppImage',
-      it: 'Windows 11 COM & Linux V4L2 AppImage'
+      en: '100% Offline, Private & Powered by Pure Rust',
+      it: '100% Offline, Privata e Leggerissima (Pure Rust)'
     },
     desc: {
-      en: 'Zero-latency 64-bit Seqlock Shared Memory IPC on Windows 11 (`IMFMediaSourceEx`) and native `v4l2loopback` `/dev/videoN` sink on Linux packaged as a self-contained `SmartCam-v1.0.0-x86_64.AppImage`.',
-      it: 'IPC Shared Memory Seqlock a 64-bit su Windows 11 (`IMFMediaSourceEx`) e sink nativo `v4l2loopback` `/dev/videoN` su Linux impacchettato in `SmartCam-v1.0.0-x86_64.AppImage`.'
+      en: 'Built 100% in pure Rust for maximum speed and minimal battery/CPU usage. Every single frame stays on your computer — zero cloud uploads, zero accounts, zero subscriptions, and zero watermarks.',
+      it: 'Scritta al 100% in Rust puro per offrire massima velocità e consumo minimo di batteria e CPU. Ogni fotogramma resta sul tuo computer: zero cloud, zero account, zero abbonamenti e zero filigrane.'
     },
-    tags: ['WIN11 MF COM', 'V4L2LOOPBACK', 'APPIMAGE']
+    tags: ['100% OFFLINE', 'ZERO CLOUD', '100% PURE RUST']
   }
 ];
 
@@ -177,16 +201,32 @@ function toggleLanguage() {
 
 function applyLocalization() {
   const t = I18N[currentLang];
-  document.getElementById('hero-tag').textContent = t.heroTag;
-  document.getElementById('hero-title').textContent = t.heroTitle;
-  document.getElementById('hero-desc').textContent = t.heroDesc;
-  document.getElementById('tb-title').textContent = t.tbTitle;
-  document.getElementById('btn-start-cam').textContent = t.btnStartCam;
-  document.getElementById('eula-title').textContent = t.eulaTitle;
-  document.getElementById('eula-text').textContent = t.eulaText;
-  document.getElementById('btn-accept').textContent = t.btnAccept;
-  document.getElementById('btn-decline').textContent = t.btnDecline;
-  document.getElementById('lang-btn').textContent = currentLang === 'en' ? '[ EN* | IT ]' : '[ EN | IT* ]';
+  const setTxt = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && val) el.textContent = val;
+  };
+  setTxt('sys-badge', t.sysBadge);
+  setTxt('hdr-projects-btn', t.hdrProjectsBtn);
+  setTxt('hero-tag', t.heroTag);
+  setTxt('hero-title', t.heroTitle);
+  setTxt('hero-desc', t.heroDesc);
+  setTxt('flt-all', t.fltAll);
+  setTxt('flt-studio', t.fltStudio);
+  setTxt('flt-mobile', t.fltMobile);
+  setTxt('flt-platforms', t.fltPlatforms);
+  setTxt('flt-privacy', t.fltPrivacy);
+  setTxt('tb-tag', t.tbTag);
+  setTxt('tb-title', t.tbTitle);
+  setTxt('btn-start-cam', t.btnStartCam);
+  setTxt('creator-tag', t.creatorTag);
+  setTxt('creator-title', t.creatorTitle);
+  setTxt('creator-desc', t.creatorDesc);
+  setTxt('btn-creator-portfolio', t.btnCreatorPortfolio);
+  setTxt('eula-title', t.eulaTitle);
+  setTxt('eula-text', t.eulaText);
+  setTxt('btn-accept', t.btnAccept);
+  setTxt('btn-decline', t.btnDecline);
+  setTxt('lang-btn', currentLang === 'en' ? '[ EN* | IT ]' : '[ EN | IT* ]');
   renderModules();
 }
 
@@ -211,7 +251,7 @@ function renderModules() {
     const card = document.createElement('article');
     card.className = 'cyber-card';
     card.innerHTML = `
-      <div class="card-meta"><span>${m.id}</span><span>MOD_${m.cat.toUpperCase()}</span></div>
+      <div class="card-meta"><span>${m.id}</span><span>SMARTCAM_V2</span></div>
       <h3 class="card-title">${m.title[currentLang]}</h3>
       <p class="card-body">${m.desc[currentLang]}</p>
       <div class="card-tags">${m.tags.map(tg => `<span class="tag-badge">${tg}</span>`).join('')}</div>
