@@ -54,6 +54,69 @@ bool TestFrameBufferSimdAlignment() {
     return true;
 }
 
+bool TestFrameBufferCopyAssignIntoLargerBuffer() {
+    // Copy-assigning a small frame into a FrameBuffer that already owns a larger
+    // allocation reuses that allocation: only the source frame's bytes may be copied.
+    FrameBuffer large(64, 64, PixelFormat::BGRA32);
+    FrameBuffer small(2, 2, PixelFormat::BGRA32);
+    if (!large.IsValid() || !small.IsValid()) return false;
+    const size_t large_bytes = large.SizeBytes();
+    const uint8_t* const large_data_before = large.Data();
+    std::memset(large.Data(), 0xAB, large_bytes);
+    for (size_t i = 0; i < small.SizeBytes(); ++i) {
+        small.Data()[i] = static_cast<uint8_t>(i + 1);
+    }
+
+    large = small;
+
+    if (!large.IsValid() || large.Width() != 2 || large.Height() != 2 ||
+        large.Stride() != 2 * 4 || large.SizeBytes() != small.SizeBytes()) {
+        std::fprintf(stderr, "[FAIL] Copy-assigned FrameBuffer has wrong geometry %ux%u stride=%u\n",
+                     large.Width(), large.Height(), large.Stride());
+        return false;
+    }
+    if (std::memcmp(large.Data(), small.Data(), small.SizeBytes()) != 0) {
+        std::fprintf(stderr, "[FAIL] Copy-assigned FrameBuffer pixels differ from source\n");
+        return false;
+    }
+    if (large.Data() == large_data_before) {
+        for (size_t i = small.SizeBytes(); i < large_bytes; ++i) {
+            if (large.Data()[i] != 0xAB) {
+                std::fprintf(stderr, "[FAIL] Copy-assignment wrote past the %zu-byte source frame (byte %zu)\n",
+                             small.SizeBytes(), i);
+                return false;
+            }
+        }
+    }
+
+    // Same path through PhoneCameraPlugin::ReadFrame: the caller reuses out_frame,
+    // which still holds the larger pairing card when the first phone frame arrives.
+    using namespace smartcam::common::plugins;
+    PhoneCameraPlugin phone_plugin;
+    CameraCaptureConfig cap_cfg{};
+    cap_cfg.width  = 1280;
+    cap_cfg.height = 720;
+    FrameBuffer out_frame;
+    if (!phone_plugin.Open(cap_cfg) || !phone_plugin.ReadFrame(out_frame, 100) ||
+        out_frame.Width() != 1280 || out_frame.Height() != 720) {
+        return false;
+    }
+    std::vector<uint8_t> phone_pixels(64 * 48 * 4);
+    for (size_t i = 0; i < phone_pixels.size(); ++i) {
+        phone_pixels[i] = static_cast<uint8_t>(i * 7);
+    }
+    if (!phone_plugin.PushDecodedPhoneFrame(phone_pixels.data(), 64, 48, 64 * 4) ||
+        !phone_plugin.ReadFrame(out_frame, 100) ||
+        out_frame.Width() != 64 || out_frame.Height() != 48 ||
+        std::memcmp(out_frame.Data(), phone_pixels.data(), phone_pixels.size()) != 0) {
+        std::fprintf(stderr, "[FAIL] PhoneCameraPlugin did not deliver the 64x48 phone frame after the pairing card\n");
+        return false;
+    }
+
+    std::printf("[PASS] TestFrameBufferCopyAssignIntoLargerBuffer (64x64 <- 2x2 copies 16 bytes, phone 1280x720 -> 64x48)\n");
+    return true;
+}
+
 bool TestCenterCrop16x9To4x3() {
     const CropRect rect = CropScaler::ComputeCenterCropRect(1920, 1080, 4, 3);
     if (rect.width != 1440 || rect.height != 1080 || rect.x != 240 || rect.y != 0) {
@@ -1177,6 +1240,7 @@ int main() {
     std::printf("=== SmartCam Common Engine Unit Tests (PEFL v1.0) ===\n");
     bool ok = true;
     ok &= TestFrameBufferSimdAlignment();
+    ok &= TestFrameBufferCopyAssignIntoLargerBuffer();
     ok &= TestCenterCrop16x9To4x3();
     ok &= TestGreenScreenHsvSegmentation();
     ok &= TestGreenScreenAutoCalibration();
