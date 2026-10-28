@@ -13,24 +13,26 @@
 
 [package]
 name = "smartcam"
-version = "1.0.0"
-edition = "2021"
-authors = ["Rubens Rainelli <rubens@rainelli.it>"]
-description = "SmartCam — Applicazione Desktop Nativa & Virtual Camera Windows 11 (PEFL v1.0)"
-license = "LicenseRef-PEFL-1.0"
-license-file = "../LICENSE"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "SmartCam v2.0 — Pure Rust Native Desktop Application & Media Foundation Virtual Camera (PEFL v1.0)"
+license.workspace = true
 publish = false
+
+[lints]
+workspace = true
 
 [[bin]]
 name = "SmartCam"
 path = "src/main.rs"
 
 [dependencies]
-# Zero external dependencies — pure native Win32 API & Media Foundation COM bindings
+smartcam-engine = { workspace = true }
+smartcam-capture = { workspace = true }
+rcgen = { workspace = true }
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
 
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-panic = "abort"
-strip = true
+[target.'cfg(windows)'.build-dependencies]
+winresource = { workspace = true }

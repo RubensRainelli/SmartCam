@@ -15,16 +15,13 @@
 
 #![allow(dead_code)]
 
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::config::SmartCamConfig;
-use crate::engine_bridge::{is_ir_camera_name, CameraDeviceEntry, NativeEngineLibrary};
+use crate::engine_bridge::{CameraDeviceEntry, NativeEngineLibrary};
 use crate::win32_ffi::*;
 
 pub const SMARTCAM_CLSID: &str = "{9D4B8E71-3F5A-4E9C-A8B2-71C9D0E54F21}";
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Clone, Debug)]
 pub struct BuildVariantStatus {
@@ -56,59 +53,58 @@ pub struct SystemDiagnostics {
     pub autostart_enabled: bool,
 }
 
-pub fn detect_build_variants(repo_root: &Path) -> Vec<BuildVariantStatus> {
-    let build_root = repo_root.join("platforms").join("windows").join("build");
-    let bin_dir = repo_root.join("bin");
-    let specs = [
-        (
-            "out_avx2",
-            "AVX2 Baseline (Universale x86_64 — 256-bit YMM)",
-            build_root.join("out_avx2"),
-            "smartcam_engine_avx2.dll",
-        ),
-        (
-            "out_avx512",
-            "AVX-512 High-Throughput (512-bit ZMM Registers)",
-            build_root.join("out_avx512"),
-            "smartcam_engine_avx512.dll",
-        ),
-    ];
-
-    let mut out = Vec::new();
-    for (name, label, dir, bin_dll_name) in specs {
-        let mf_primary = dir.join("smartcam_mf_source.dll");
-        let mf_bin = bin_dir.join("smartcam_mf_source.dll");
-        let mf_dll = if mf_primary.is_file() {
-            mf_primary
-        } else if mf_bin.is_file() {
-            mf_bin
-        } else {
-            mf_primary
-        };
-
-        let eng_primary = dir.join("smartcam_engine.dll");
-        let eng_sub = dir.join("common_engine").join("smartcam_engine.dll");
-        let eng_bin = bin_dir.join(bin_dll_name);
-        let eng_dll = if eng_primary.is_file() {
-            eng_primary
-        } else if eng_sub.is_file() {
-            eng_sub
-        } else if eng_bin.is_file() {
-            eng_bin
-        } else {
-            eng_primary
-        };
-
-        out.push(BuildVariantStatus {
-            name: name.to_string(),
-            label: label.to_string(),
-            has_mf_source: mf_dll.is_file(),
-            has_engine: eng_dll.is_file(),
-            mf_source_dll: mf_dll,
-            engine_dll: eng_dll,
-        });
+fn find_mf_source_dll(repo_root: &Path) -> PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let side_by_side = dir.join("smartcam_mf_source.dll");
+            if side_by_side.is_file() {
+                return side_by_side;
+            }
+        }
     }
-    out
+    let candidates = [
+        repo_root
+            .join("target")
+            .join("release")
+            .join("smartcam_mf_source.dll"),
+        repo_root
+            .join("target")
+            .join("debug")
+            .join("smartcam_mf_source.dll"),
+        repo_root.join("bin").join("smartcam_mf_source.dll"),
+        repo_root.join("smartcam_mf_source.dll"),
+    ];
+    for c in &candidates {
+        if c.is_file() {
+            return c.clone();
+        }
+    }
+    candidates[0].clone()
+}
+
+pub fn detect_build_variants(repo_root: &Path) -> Vec<BuildVariantStatus> {
+    let mf_dll = find_mf_source_dll(repo_root);
+    let has_mf = mf_dll.is_file();
+    let exe_path = std::env::current_exe().unwrap_or_else(|_| repo_root.join("SmartCam.exe"));
+
+    vec![
+        BuildVariantStatus {
+            name: "out_avx2".to_string(),
+            label: "Pure Rust AVX2 Runtime Dispatch (256-bit YMM)".to_string(),
+            has_mf_source: has_mf,
+            has_engine: true,
+            mf_source_dll: mf_dll.clone(),
+            engine_dll: exe_path.clone(),
+        },
+        BuildVariantStatus {
+            name: "out_avx512".to_string(),
+            label: "Pure Rust AVX-512 Runtime Dispatch (512-bit ZMM)".to_string(),
+            has_mf_source: has_mf,
+            has_engine: true,
+            mf_source_dll: mf_dll,
+            engine_dll: exe_path,
+        },
+    ]
 }
 
 fn reg_query_string(root: HKEY, subkey: &str, value_name: &str) -> Option<String> {
@@ -276,43 +272,6 @@ pub fn enumerate_cameras_smart(repo_root: &Path) -> Vec<CameraDeviceEntry> {
     let mut list = Vec::new();
     if let Some(lib) = NativeEngineLibrary::load_best(repo_root, "out_avx2", "auto") {
         list = lib.enumerate_cameras();
-        unsafe {
-            if !lib.hmodule.is_null() {
-                FreeLibrary(lib.hmodule);
-            }
-        }
-    }
-
-    // Also query WMI PnP Camera devices (which includes Windows Hello IR Sensor cameras
-    // registered under KSCATEGORY_SENSOR_CAMERA so the user can see both RGB and IR cameras)
-    let ps_cmd = "Get-CimInstance Win32_PnPEntity | Where-Object { $_.PNPClass -in @('Camera','Image') -and $_.Status -eq 'OK' } | ForEach-Object { \"$($_.Name)|$($_.DeviceID)\" }";
-    if let Ok(out) = Command::new("powershell.exe")
-        .args(["-NoProfile", "-Command", ps_cmd])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-    {
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        for line in stdout.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let (name, dev_id) = trimmed.split_once('|').unwrap_or((trimmed, ""));
-            if name.eq_ignore_ascii_case("SmartCam") || name.contains("SmartCam Virtual Camera") {
-                continue;
-            }
-            let already_present = list.iter().any(|c| c.name.eq_ignore_ascii_case(name));
-            if !already_present {
-                let next_idx = list.len() as u32;
-                let is_ir = is_ir_camera_name(name, dev_id);
-                list.push(CameraDeviceEntry {
-                    index: next_idx,
-                    name: name.to_string(),
-                    symbolic_link: dev_id.to_string(),
-                    is_infrared: is_ir,
-                });
-            }
-        }
     }
 
     if list.is_empty() {
@@ -342,22 +301,6 @@ pub fn select_best_default_camera_index(cameras: &[CameraDeviceEntry], current_i
     }
     cameras[0].index
 }
-
-pub const DSHOW_VIDEO_INPUT_CATEGORY: &str = "{860BB310-5D01-11d0-BD3B-00A0C911CE86}";
-
-const SMARTCAM_FILTER_DATA: [u8; 88] = [
-    0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00,
-    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x30, 0x70, 0x69, 0x33, 0x08, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x30, 0x74, 0x79, 0x33, 0x00, 0x00, 0x00, 0x00,
-    0x38, 0x00, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00,
-    0x76, 0x69, 0x64, 0x73, 0x00, 0x00, 0x10, 0x00,
-    0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-];
 
 fn reg_set_string(root: HKEY, subkey: &str, value_name: &str, data: &str) -> bool {
     unsafe {
@@ -401,63 +344,38 @@ fn reg_set_string(root: HKEY, subkey: &str, value_name: &str, data: &str) -> boo
     }
 }
 
-fn reg_set_binary(root: HKEY, subkey: &str, value_name: &str, bytes: &[u8]) -> bool {
-    unsafe {
-        let wsub = to_wstring(subkey);
-        let mut hkey: HKEY = NULL;
-        let mut disp: DWORD = 0;
-        if RegCreateKeyExW(
-            root,
-            wsub.as_ptr(),
-            0,
-            std::ptr::null(),
-            0,
-            KEY_WRITE | KEY_WOW64_64KEY,
-            std::ptr::null(),
-            &mut hkey,
-            &mut disp,
-        ) != 0
-        {
-            return false;
-        }
-        let wval = to_wstring(value_name);
-        let status = RegSetValueExW(
-            hkey,
-            wval.as_ptr(),
-            0,
-            REG_BINARY,
-            bytes.as_ptr(),
-            bytes.len() as DWORD,
-        );
-        RegCloseKey(hkey);
-        status == 0
-    }
-}
-
 fn register_virtual_camera_in_hive(root: HKEY, dll_path: &str) -> bool {
     let clsid_subkey = format!("Software\\Classes\\CLSID\\{}", SMARTCAM_CLSID);
     let inproc_subkey = format!("{}\\InprocServer32", clsid_subkey);
-    let dshow_subkey = format!(
-        "Software\\Classes\\CLSID\\{}\\Instance\\{}",
-        DSHOW_VIDEO_INPUT_CATEGORY, SMARTCAM_CLSID
+    let mf_vcam_subkey = format!(
+        "Software\\Microsoft\\Windows Media Foundation\\VirtualCameras\\{}",
+        SMARTCAM_CLSID
     );
+    let mf_scheme_subkey =
+        "Software\\Microsoft\\Windows Media Foundation\\ByteStreamHandlers\\smartcam:";
 
     let ok1 = reg_set_string(root, &clsid_subkey, "", "SmartCam");
-    let ok2 = reg_set_string(root, &inproc_subkey, "", dll_path);
-    let ok3 = reg_set_string(root, &inproc_subkey, "ThreadingModel", "Both");
-    let ok4 = reg_set_string(root, &dshow_subkey, "FriendlyName", "SmartCam");
-    let ok5 = reg_set_string(root, &dshow_subkey, "CLSID", SMARTCAM_CLSID);
-    let ok6 = reg_set_string(root, &dshow_subkey, "DevicePath", "smartcam://virtual-camera-0");
-    let ok7 = reg_set_binary(root, &dshow_subkey, "FilterData", &SMARTCAM_FILTER_DATA);
+    let ok2 = reg_set_string(root, &clsid_subkey, "FriendlyName", "SmartCam");
+    let ok3 = reg_set_string(root, &inproc_subkey, "", dll_path);
+    let ok4 = reg_set_string(root, &inproc_subkey, "ThreadingModel", "Both");
+    let _ = reg_set_string(root, &mf_vcam_subkey, "FriendlyName", "SmartCam");
+    let _ = reg_set_string(root, &mf_vcam_subkey, "CLSID", SMARTCAM_CLSID);
+    let _ = reg_set_string(root, mf_scheme_subkey, SMARTCAM_CLSID, "SmartCam");
 
-    ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7
+    ok1 && ok2 && ok3 && ok4
 }
 
-pub fn ensure_virtual_camera_registered(repo_root: &Path, preferred_variant: &str) -> Option<PathBuf> {
+pub fn ensure_virtual_camera_registered(
+    repo_root: &Path,
+    preferred_variant: &str,
+) -> Option<PathBuf> {
     let variants = detect_build_variants(repo_root);
     let mut chosen_dll: Option<PathBuf> = None;
 
-    if let Some(v) = variants.iter().find(|v| v.name == preferred_variant && v.has_mf_source) {
+    if let Some(v) = variants
+        .iter()
+        .find(|v| v.name == preferred_variant && v.has_mf_source)
+    {
         chosen_dll = Some(v.mf_source_dll.clone());
     }
     if chosen_dll.is_none() {
@@ -466,18 +384,17 @@ pub fn ensure_virtual_camera_registered(repo_root: &Path, preferred_variant: &st
         }
     }
     if chosen_dll.is_none() {
-        let bin_cand = repo_root.join("bin").join("smartcam_mf_source.dll");
-        if bin_cand.is_file() {
-            chosen_dll = Some(bin_cand);
+        let cand = find_mf_source_dll(repo_root);
+        if cand.is_file() {
+            chosen_dll = Some(cand);
         }
     }
 
     let dll_path = chosen_dll?;
     let dll_str = dll_path.to_string_lossy().to_string();
 
-    // Register in HKCU (works immediately without UAC for Chromium, Edge, Firefox, OBS, Zoom, Teams)
+    // Register in HKCU (works immediately without UAC) and HKLM if elevated
     let ok_hkcu = register_virtual_camera_in_hive(HKEY_CURRENT_USER, &dll_str);
-    // Also register in HKLM if elevated
     let _ = register_virtual_camera_in_hive(HKEY_LOCAL_MACHINE, &dll_str);
 
     if ok_hkcu {
@@ -490,21 +407,15 @@ pub fn ensure_virtual_camera_registered(repo_root: &Path, preferred_variant: &st
 pub fn collect_diagnostics(repo_root: &Path, include_cameras: bool) -> SystemDiagnostics {
     let clsid_subkey = format!("SOFTWARE\\Classes\\CLSID\\{}", SMARTCAM_CLSID);
     let inproc_subkey = format!("{}\\InprocServer32", clsid_subkey);
-    let dshow_subkey = format!(
-        "SOFTWARE\\Classes\\CLSID\\{}\\Instance\\{}",
-        DSHOW_VIDEO_INPUT_CATEGORY, SMARTCAM_CLSID
-    );
 
     let mut friendly = reg_query_string(HKEY_LOCAL_MACHINE, &clsid_subkey, "")
         .or_else(|| reg_query_string(HKEY_CURRENT_USER, &clsid_subkey, ""));
     let mut inproc = reg_query_string(HKEY_LOCAL_MACHINE, &inproc_subkey, "")
         .or_else(|| reg_query_string(HKEY_CURRENT_USER, &inproc_subkey, ""))
         .unwrap_or_default();
-    let dshow_friendly = reg_query_string(HKEY_LOCAL_MACHINE, &dshow_subkey, "FriendlyName")
-        .or_else(|| reg_query_string(HKEY_CURRENT_USER, &dshow_subkey, "FriendlyName"));
 
-    // Auto-heal / auto-register if missing, pointing to a non-existent DLL, or missing DirectShow category
-    if inproc.is_empty() || !Path::new(&inproc).is_file() || dshow_friendly.is_none() {
+    // Auto-heal / auto-register if missing or pointing to a non-existent DLL
+    if inproc.is_empty() || !Path::new(&inproc).is_file() {
         if let Some(healed_path) = ensure_virtual_camera_registered(repo_root, "out_avx2") {
             inproc = healed_path.to_string_lossy().to_string();
             friendly = Some("SmartCam".to_string());
@@ -522,7 +433,7 @@ pub fn collect_diagnostics(repo_root: &Path, include_cameras: bool) -> SystemDia
     .map(|v| v == 1);
 
     let variants = detect_build_variants(repo_root);
-    let active_build_variant = if inproc.to_ascii_lowercase().contains("out_avx512") {
+    let active_build_variant = if crate::engine_bridge::cpu_supports_avx512() {
         "out_avx512".to_string()
     } else {
         "out_avx2".to_string()
@@ -558,142 +469,78 @@ pub fn collect_diagnostics(repo_root: &Path, include_cameras: bool) -> SystemDia
 }
 
 pub fn invoke_driver_install(repo_root: &Path, variant: &str) -> (bool, String) {
-    // 1. Register immediately via native Win32 Registry APIs (HKCU + HKLM if admin)
-    let native_reg_dll = ensure_virtual_camera_registered(repo_root, variant);
-
-    let script = repo_root
-        .join("platforms")
-        .join("windows")
-        .join("scripts")
-        .join("install_driver.ps1");
-    if !script.is_file() {
-        if let Some(dll) = native_reg_dll {
-            return (
-                true,
-                format!(
-                    "Driver Virtual Camera 'SmartCam' registrato con successo ({})",
-                    dll.display()
-                ),
-            );
-        }
-        return (false, format!("Script non trovato: {}", script.display()));
-    }
-
-    let variants = detect_build_variants(repo_root);
-    let dll_path = variants
-        .iter()
-        .find(|v| v.name == variant)
-        .map(|v| v.mf_source_dll.clone())
-        .unwrap_or_else(|| {
-            repo_root
-                .join("platforms")
-                .join("windows")
-                .join("build")
-                .join(variant)
-                .join("smartcam_mf_source.dll")
-        });
-
-    let mut cmd = Command::new("powershell.exe");
-    cmd.args([
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        &script.to_string_lossy(),
-        "-NonInteractiveAcceptPefl",
-        "-DllPath",
-        &dll_path.to_string_lossy(),
-    ]);
-    cmd.creation_flags(CREATE_NO_WINDOW);
-
-    match cmd.output() {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            let combined = format!("{}\n{}", stdout.trim(), stderr.trim()).trim().to_string();
-            if out.status.success() || native_reg_dll.is_some() {
-                (
-                    true,
-                    if combined.is_empty() {
-                        format!("Driver SmartCam ({}) registrato con successo!", variant)
-                    } else {
-                        combined
-                    },
-                )
-            } else {
-                (false, combined)
-            }
-        }
-        Err(e) => {
-            if let Some(dll) = native_reg_dll {
-                (
-                    true,
-                    format!(
-                        "Driver SmartCam registrato nativamente ({})",
-                        dll.display()
-                    ),
-                )
-            } else {
-                (false, format!("Errore esecuzione install_driver.ps1: {}", e))
-            }
-        }
+    if let Some(dll) = ensure_virtual_camera_registered(repo_root, variant) {
+        (
+            true,
+            format!(
+                "Driver Media Foundation 'SmartCam' registrato con successo ({})",
+                dll.display()
+            ),
+        )
+    } else {
+        (
+            false,
+            "Impossibile trovare o registrare smartcam_mf_source.dll".to_string(),
+        )
     }
 }
 
 pub fn invoke_driver_uninstall(repo_root: &Path) -> (bool, String) {
-    let script = repo_root
-        .join("platforms")
-        .join("windows")
-        .join("scripts")
-        .join("uninstall_driver.ps1");
-    if !script.is_file() {
-        return (false, format!("Script non trovato: {}", script.display()));
-    }
-
-    let mut cmd = Command::new("powershell.exe");
-    cmd.args([
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        &script.to_string_lossy(),
-        "-NonInteractiveAcceptPefl",
-    ]);
-    cmd.creation_flags(CREATE_NO_WINDOW);
-
-    match cmd.output() {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            let combined = format!("{}\n{}", stdout.trim(), stderr.trim()).trim().to_string();
-            (out.status.success(), combined)
+    let dll = find_mf_source_dll(repo_root);
+    unsafe {
+        if dll.is_file() {
+            let wpath = to_wstring(&dll.to_string_lossy());
+            let hmod = LoadLibraryW(wpath.as_ptr());
+            if !hmod.is_null() {
+                type FnDllUnreg = unsafe extern "system" fn() -> i32;
+                let sym = GetProcAddress(hmod, b"DllUnregisterServer\0".as_ptr());
+                if !sym.is_null() {
+                    let f: FnDllUnreg = std::mem::transmute_copy(&sym);
+                    let _ = f();
+                }
+                FreeLibrary(hmod);
+            }
         }
-        Err(e) => (false, format!("Errore esecuzione uninstall_driver.ps1: {}", e)),
     }
+    (
+        true,
+        "Driver Media Foundation 'SmartCam' rimosso dal registro.".to_string(),
+    )
 }
 
 pub fn open_windows11_camera_privacy_settings() {
     unsafe {
         let op = to_wstring("open");
         let uri = to_wstring("ms-settings:privacy-webcam");
-        ShellExecuteW(NULL, op.as_ptr(), uri.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
+        ShellExecuteW(
+            NULL,
+            op.as_ptr(),
+            uri.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        );
     }
 }
 
 pub fn open_web_testbench(repo_root: &Path) -> String {
     let html_path = repo_root.join("app").join("web_preview").join("index.html");
     let url = if html_path.is_file() {
-        format!(
-            "file:///{}",
-            html_path.to_string_lossy().replace('\\', "/")
-        )
+        format!("file:///{}", html_path.to_string_lossy().replace('\\', "/"))
     } else {
         "http://localhost:8080".to_string()
     };
     unsafe {
         let op = to_wstring("open");
         let wurl = to_wstring(&url);
-        ShellExecuteW(NULL, op.as_ptr(), wurl.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
+        ShellExecuteW(
+            NULL,
+            op.as_ptr(),
+            wurl.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        );
     }
     url
 }
@@ -761,7 +608,11 @@ pub fn print_cli_status(diag: &SystemDiagnostics, cfg: &SmartCamConfig, as_json:
     println!("  * Media Foundation CLSID : {}", diag.clsid);
     println!(
         "  * Stato Registro Driver  : {}",
-        if diag.clsid_registered { "REGISTRATO (OK — 64-bit x86_64)" } else { "NON REGISTRATO" }
+        if diag.clsid_registered {
+            "REGISTRATO (OK — 64-bit x86_64)"
+        } else {
+            "NON REGISTRATO"
+        }
     );
     if !diag.registered_inproc_dll.is_empty() {
         println!(
@@ -769,7 +620,10 @@ pub fn print_cli_status(diag: &SystemDiagnostics, cfg: &SmartCamConfig, as_json:
             diag.registered_inproc_dll, diag.registered_dll_exists
         );
     }
-    println!("  * EnableFrameServerMode  : {:?}", diag.frameserver_enabled);
+    println!(
+        "  * EnableFrameServerMode  : {:?}",
+        diag.frameserver_enabled
+    );
     println!(
         "  * Shared Memory IPC      : {}",
         if diag.ipc_active {
@@ -784,7 +638,11 @@ pub fn print_cli_status(diag: &SystemDiagnostics, cfg: &SmartCamConfig, as_json:
     println!("------------------------------------------------------------------------");
     println!("  Varianti Motore C++ SIMD Compilate:");
     for b in &diag.build_variants {
-        let mark = if b.name == diag.active_build_variant { "*" } else { " " };
+        let mark = if b.name == diag.active_build_variant {
+            "*"
+        } else {
+            " "
+        };
         println!(
             "   [{}] {:10} : MF_Source={} | Engine_SIMD={} ({})",
             mark, b.name, b.has_mf_source, b.has_engine, b.label
@@ -827,9 +685,6 @@ pub fn print_cli_status(diag: &SystemDiagnostics, cfg: &SmartCamConfig, as_json:
         cfg.compositor.simd_acceleration,
         cfg.ai_enabled
     );
-    println!(
-        "    - Plugin Attivi    : {:?}",
-        cfg.enabled_plugins
-    );
+    println!("    - Plugin Attivi    : {:?}", cfg.enabled_plugins);
     println!("========================================================================");
 }

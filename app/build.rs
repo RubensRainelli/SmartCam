@@ -17,10 +17,10 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn find_windres() -> (PathBuf, Option<PathBuf>) {
+fn find_windres() -> Option<(PathBuf, Option<PathBuf>)> {
     if let Ok(output) = Command::new("windres").arg("--version").output() {
         if output.status.success() {
-            return (PathBuf::from("windres"), None);
+            return Some((PathBuf::from("windres"), None));
         }
     }
 
@@ -42,11 +42,11 @@ fn find_windres() -> (PathBuf, Option<PathBuf>) {
     for bin_dir in candidates {
         let exe = bin_dir.join("windres.exe");
         if exe.exists() {
-            return (exe, Some(bin_dir));
+            return Some((exe, Some(bin_dir)));
         }
     }
 
-    (PathBuf::from("windres"), None)
+    None
 }
 
 fn main() {
@@ -60,34 +60,56 @@ fn main() {
         return;
     }
 
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let rc_path = manifest_dir.join("smartcam.rc");
-    let obj_path = out_dir.join("smartcam_res.o");
 
-    let (windres_bin, extra_bin_dir) = find_windres();
+    if target_env == "gnu" {
+        if let Some((windres_bin, extra_bin_dir)) = find_windres() {
+            let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+            let rc_path = manifest_dir.join("smartcam.rc");
+            let obj_path = out_dir.join("smartcam_res.o");
 
-    let mut cmd = Command::new(&windres_bin);
-    cmd.current_dir(&manifest_dir)
-        .arg("-i")
-        .arg(&rc_path)
-        .arg("-O")
-        .arg("coff")
-        .arg("-o")
-        .arg(&obj_path);
+            let mut cmd = Command::new(&windres_bin);
+            cmd.current_dir(&manifest_dir)
+                .arg("-i")
+                .arg(&rc_path)
+                .arg("-O")
+                .arg("coff")
+                .arg("-o")
+                .arg(&obj_path);
 
-    if let Some(bin_dir) = extra_bin_dir {
-        let current_path = env::var("PATH").unwrap_or_default();
-        cmd.env("PATH", format!("{};{}", bin_dir.display(), current_path));
+            if let Some(bin_dir) = extra_bin_dir {
+                let current_path = env::var("PATH").unwrap_or_default();
+                cmd.env("PATH", format!("{};{}", bin_dir.display(), current_path));
+            }
+
+            if let Ok(status) = cmd.status() {
+                if status.success() {
+                    println!("cargo:rustc-link-arg={}", obj_path.display());
+                    return;
+                }
+            }
+        }
     }
 
-    let status = cmd
-        .status()
-        .expect("Impossibile eseguire windres.exe per compilare smartcam.rc");
-
-    if !status.success() {
-        panic!("windres.exe ha restituito un errore durante la compilazione di smartcam.rc");
+    #[cfg(windows)]
+    {
+        let mut res = winresource::WindowsResource::new();
+        res.set_icon_with_id("../assets/icons/smartcam_cyber_lens.ico", "101");
+        res.set_icon_with_id("../assets/icons/smartcam_emerald_cam.ico", "102");
+        res.set_icon_with_id("../assets/icons/smartcam_neon_iris.ico", "103");
+        res.set("ProductName", "SmartCam");
+        res.set(
+            "FileDescription",
+            "SmartCam v2.0.0 — Pure Rust Studio Virtual Camera",
+        );
+        res.set("CompanyName", "Rubens Rainelli");
+        res.set(
+            "LegalCopyright",
+            "Copyright (c) 2026 Rubens Rainelli (PEFL v1.0)",
+        );
+        res.set("FileVersion", "2.0.0.0");
+        res.set("ProductVersion", "2.0.0.0");
+        let _ = res.compile();
     }
-
-    println!("cargo:rustc-link-arg={}", obj_path.display());
 }

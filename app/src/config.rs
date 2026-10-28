@@ -71,9 +71,9 @@ pub struct AiSelfieConfig {
     pub input_height: u32,
     pub confidence_threshold: f32,
     pub temporal_smoothing: f32,
-    pub engine_mode: i32,       // 0 = Auto/Ibrido, 1 = Sagoma & Volto AI, 2 = Differenza Sfondo (Telo Virtuale)
+    pub engine_mode: i32, // 0 = Auto/Ibrido, 1 = Sagoma & Volto AI, 2 = Differenza Sfondo (Telo Virtuale)
     pub bg_diff_tolerance: f32, // [0.10 .. 0.95] Tolleranza Luce/LED & Posizione
-    pub silhouette_mode: i32,   // 0 = Volto + Busto, 1 = Solo Volto
+    pub silhouette_mode: i32, // 0 = Volto + Busto, 1 = Solo Volto
     pub face_calibrated: bool,
     pub calib_skin_cb: f32,
     pub calib_skin_cr: f32,
@@ -93,9 +93,9 @@ pub struct SegmentationConfig {
 
 #[derive(Clone, Debug)]
 pub struct CompositorConfig {
-    pub compute_backend: String,   // "auto", "cpu", "vulkan", "opencl", "cuda", "rocm"
+    pub compute_backend: String, // "auto", "cpu", "vulkan", "opencl", "cuda", "rocm"
     pub simd_acceleration: String, // "auto", "avx512", "avx2", "scalar"
-    pub background_mode: String,   // "solid_color", "image", "blur"
+    pub background_mode: String, // "solid_color", "image", "blur"
     pub background_color_rgb: [u8; 3],
     pub background_image_path: String,
     pub background_blur_radius: u32,
@@ -215,7 +215,13 @@ impl Default for SmartCamConfig {
     }
 }
 
-pub fn compute_center_crop_rect(src_w: u32, src_h: u32, aspect_w: u32, aspect_h: u32) -> (u32, u32, u32, u32) {
+#[allow(dead_code)]
+pub fn compute_center_crop_rect(
+    src_w: u32,
+    src_h: u32,
+    aspect_w: u32,
+    aspect_h: u32,
+) -> (u32, u32, u32, u32) {
     if src_w == 0 || src_h == 0 || aspect_w == 0 || aspect_h == 0 {
         return (0, 0, src_w, src_h);
     }
@@ -250,7 +256,12 @@ pub fn resolve_aspect_ratio_pair(aspect_str: &str, src_w: u32, src_h: u32) -> (u
     }
 }
 
-pub fn compute_output_dimensions_for_preset(aspect_ratio: &str, resolution_preset: &str, in_w: u32, in_h: u32) -> (u32, u32) {
+pub fn compute_output_dimensions_for_preset(
+    aspect_ratio: &str,
+    resolution_preset: &str,
+    in_w: u32,
+    in_h: u32,
+) -> (u32, u32) {
     let base_h: u32 = match resolution_preset {
         "1080p" => 1080,
         "900p" => 900,
@@ -304,12 +315,16 @@ pub fn compute_output_dimensions_for_preset(aspect_ratio: &str, resolution_prese
 }
 
 impl FramingOutputConfig {
-    pub fn compute_output_dimensions_for_preset(aspect_ratio: &str, resolution_preset: &str) -> (u32, u32) {
+    pub fn compute_output_dimensions_for_preset(
+        aspect_ratio: &str,
+        resolution_preset: &str,
+    ) -> (u32, u32) {
         compute_output_dimensions_for_preset(aspect_ratio, resolution_preset, 1920, 1080)
     }
 
     pub fn sync_dimensions_from_preset(&mut self) {
-        let (w, h) = Self::compute_output_dimensions_for_preset(&self.aspect_ratio, &self.resolution_preset);
+        let (w, h) =
+            Self::compute_output_dimensions_for_preset(&self.aspect_ratio, &self.resolution_preset);
         self.output_width = w;
         self.output_height = h;
     }
@@ -349,32 +364,53 @@ impl SmartCamConfig {
             );
         }
         self.segmentation.green_screen.hue_max = self.segmentation.green_screen.hue_max.min(180);
-        self.segmentation.green_screen.hue_min = self.segmentation.green_screen.hue_min.min(self.segmentation.green_screen.hue_max);
+        self.segmentation.green_screen.hue_min = self
+            .segmentation
+            .green_screen
+            .hue_min
+            .min(self.segmentation.green_screen.hue_max);
         if !matches!(self.segmentation.green_screen.morph_kernel_size, 0 | 3 | 5) {
             self.segmentation.green_screen.morph_kernel_size = 3;
         }
-        self.segmentation.green_screen.blur_radius = self.segmentation.green_screen.blur_radius.min(15);
-        self.segmentation.green_screen.spill_suppression =
-            self.segmentation.green_screen.spill_suppression.clamp(0.0, 1.0);
-        self.segmentation.ai_selfie.confidence_threshold =
-            self.segmentation.ai_selfie.confidence_threshold.clamp(0.10, 0.90);
-        self.segmentation.ai_selfie.temporal_smoothing =
-            self.segmentation.ai_selfie.temporal_smoothing.clamp(0.0, 0.90);
+        self.segmentation.green_screen.blur_radius =
+            self.segmentation.green_screen.blur_radius.min(15);
+        self.segmentation.green_screen.spill_suppression = self
+            .segmentation
+            .green_screen
+            .spill_suppression
+            .clamp(0.0, 1.0);
+        self.segmentation.ai_selfie.confidence_threshold = self
+            .segmentation
+            .ai_selfie
+            .confidence_threshold
+            .clamp(0.10, 0.90);
+        self.segmentation.ai_selfie.temporal_smoothing = self
+            .segmentation
+            .ai_selfie
+            .temporal_smoothing
+            .clamp(0.0, 0.90);
         self.segmentation.ai_selfie.engine_mode =
             self.segmentation.ai_selfie.engine_mode.clamp(0, 2);
-        self.segmentation.ai_selfie.bg_diff_tolerance =
-            self.segmentation.ai_selfie.bg_diff_tolerance.clamp(0.10, 0.95);
+        self.segmentation.ai_selfie.bg_diff_tolerance = self
+            .segmentation
+            .ai_selfie
+            .bg_diff_tolerance
+            .clamp(0.10, 0.95);
         self.segmentation.ai_selfie.silhouette_mode =
             self.segmentation.ai_selfie.silhouette_mode.clamp(0, 1);
         self.segmentation.ai_selfie.calib_skin_cb =
             self.segmentation.ai_selfie.calib_skin_cb.clamp(60.0, 175.0);
-        self.segmentation.ai_selfie.calib_skin_cr =
-            self.segmentation.ai_selfie.calib_skin_cr.clamp(115.0, 210.0);
+        self.segmentation.ai_selfie.calib_skin_cr = self
+            .segmentation
+            .ai_selfie
+            .calib_skin_cr
+            .clamp(115.0, 210.0);
         self.segmentation.ai_selfie.calib_head_rx =
             self.segmentation.ai_selfie.calib_head_rx.clamp(0.04, 0.40);
         self.segmentation.ai_selfie.calib_head_ry =
             self.segmentation.ai_selfie.calib_head_ry.clamp(0.06, 0.48);
-        self.compositor.background_blur_radius = self.compositor.background_blur_radius.clamp(1, 45);
+        self.compositor.background_blur_radius =
+            self.compositor.background_blur_radius.clamp(1, 45);
         self.compositor.background_zoom = self.compositor.background_zoom.clamp(1.0, 4.0);
         self.compositor.background_pan_x = self.compositor.background_pan_x.clamp(0.0, 1.0);
         self.compositor.background_pan_y = self.compositor.background_pan_y.clamp(0.0, 1.0);
@@ -571,7 +607,9 @@ impl SmartCamConfig {
                     }
                 }
                 ("framing_output", _, "aspect_ratio") => cfg.framing_output.aspect_ratio = val,
-                ("framing_output", _, "resolution_preset") => cfg.framing_output.resolution_preset = val,
+                ("framing_output", _, "resolution_preset") => {
+                    cfg.framing_output.resolution_preset = val
+                }
                 ("framing_output", _, "crop_strategy") => cfg.framing_output.crop_strategy = val,
                 ("framing_output", _, "output_width") => {
                     if let Ok(n) = val.parse::<u32>() {
@@ -629,7 +667,9 @@ impl SmartCamConfig {
                         cfg.segmentation.green_screen.spill_suppression = n;
                     }
                 }
-                ("segmentation", "ai_selfie", "model_path") => cfg.segmentation.ai_selfie.model_path = val,
+                ("segmentation", "ai_selfie", "model_path") => {
+                    cfg.segmentation.ai_selfie.model_path = val
+                }
                 ("segmentation", "ai_selfie", "input_width") => {
                     if let Ok(n) = val.parse::<u32>() {
                         cfg.segmentation.ai_selfie.input_width = n;
@@ -699,7 +739,8 @@ impl SmartCamConfig {
                     }
                 }
                 ("segmentation", "ai_selfie", "prefer_igpu_directml") => {
-                    cfg.segmentation.ai_selfie.prefer_igpu_directml = val.eq_ignore_ascii_case("true");
+                    cfg.segmentation.ai_selfie.prefer_igpu_directml =
+                        val.eq_ignore_ascii_case("true");
                 }
                 ("compositor", _, "simd_acceleration") => cfg.compositor.simd_acceleration = val,
                 ("compositor", _, "background_mode") => cfg.compositor.background_mode = val,
@@ -741,7 +782,9 @@ impl SmartCamConfig {
                 }
                 ("virtual_camera", _, "friendly_name") => cfg.virtual_camera.friendly_name = val,
                 ("virtual_camera", _, "backend") => cfg.virtual_camera.backend = val,
-                ("virtual_camera", _, "shared_memory_name") => cfg.virtual_camera.shared_memory_name = val,
+                ("virtual_camera", _, "shared_memory_name") => {
+                    cfg.virtual_camera.shared_memory_name = val
+                }
                 _ => {}
             }
         }
@@ -770,7 +813,16 @@ impl SmartCamConfig {
         let lm = self.segmentation.ai_selfie.calib_landmarks;
         let lm_yaml = format!(
             "[{:.3}, {:.3}, {:.3}, {:.3}, {:.3}, {:.3}, {:.3}, {:.3}, {:.3}, {:.3}]",
-            lm[0].0, lm[0].1, lm[1].0, lm[1].1, lm[2].0, lm[2].1, lm[3].0, lm[3].1, lm[4].0, lm[4].1
+            lm[0].0,
+            lm[0].1,
+            lm[1].0,
+            lm[1].1,
+            lm[2].0,
+            lm[2].1,
+            lm[3].0,
+            lm[3].1,
+            lm[4].0,
+            lm[4].1
         );
         let yaml = format!(
             "{header}\n\
@@ -960,7 +1012,9 @@ fn strip_yaml_comment(line: &str) -> String {
 fn clean_scalar(val: &str) -> String {
     let v = val.trim();
     // len >= 2: a lone `"` or `'` both starts and ends with the quote but has nothing to strip
-    if v.len() >= 2 && ((v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\''))) {
+    if v.len() >= 2
+        && ((v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\'')))
+    {
         v[1..v.len() - 1].replace("\\\\", "\\")
     } else {
         v.to_string()
@@ -1032,7 +1086,11 @@ mod tests {
     use super::*;
 
     fn temp_yaml_path(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("smartcam_config_test_{}_{}.yaml", name, std::process::id()))
+        std::env::temp_dir().join(format!(
+            "smartcam_config_test_{}_{}.yaml",
+            name,
+            std::process::id()
+        ))
     }
 
     #[test]
@@ -1080,12 +1138,30 @@ mod tests {
         let yaml = fs::read_to_string(&path).expect("read saved yaml");
         let _ = fs::remove_file(&path);
 
-        assert!(yaml.contains("\ncamera_input:\n  device_index: 0\n"), "{yaml}");
-        assert!(yaml.contains("\nsegmentation:\n  mode: \"ai_selfie\""), "{yaml}");
-        assert!(yaml.contains("\n  green_screen:\n    hue_min: 35 "), "{yaml}");
-        assert!(yaml.contains("\n  ai_selfie:\n    ai_enabled: true\n"), "{yaml}");
-        assert!(yaml.contains("\ncompositor:\n  compute_backend: \"auto\""), "{yaml}");
-        assert!(yaml.contains("\nvirtual_camera:\n  friendly_name: \"SmartCam\"\n"), "{yaml}");
+        assert!(
+            yaml.contains("\ncamera_input:\n  device_index: 0\n"),
+            "{yaml}"
+        );
+        assert!(
+            yaml.contains("\nsegmentation:\n  mode: \"ai_selfie\""),
+            "{yaml}"
+        );
+        assert!(
+            yaml.contains("\n  green_screen:\n    hue_min: 35 "),
+            "{yaml}"
+        );
+        assert!(
+            yaml.contains("\n  ai_selfie:\n    ai_enabled: true\n"),
+            "{yaml}"
+        );
+        assert!(
+            yaml.contains("\ncompositor:\n  compute_backend: \"auto\""),
+            "{yaml}"
+        );
+        assert!(
+            yaml.contains("\nvirtual_camera:\n  friendly_name: \"SmartCam\"\n"),
+            "{yaml}"
+        );
     }
 
     #[test]
@@ -1099,9 +1175,14 @@ mod tests {
         assert_eq!(cfg.segmentation.mode, "passthrough");
 
         cfg.save_to_file(&path).expect("save_to_file");
-        let resaved = fs::read_to_string(&path).expect("read resaved yaml").replace('\r', "");
+        let resaved = fs::read_to_string(&path)
+            .expect("read resaved yaml")
+            .replace('\r', "");
         let _ = fs::remove_file(&path);
-        assert_eq!(resaved, shipped, "config/default_config.yaml is not in the format save_to_file writes");
+        assert_eq!(
+            resaved, shipped,
+            "config/default_config.yaml is not in the format save_to_file writes"
+        );
     }
 
     #[test]
@@ -1116,7 +1197,11 @@ mod tests {
     #[test]
     fn load_from_file_survives_a_lone_quote_value() {
         let path = temp_yaml_path("lone_quote");
-        fs::write(&path, "camera_input:\n  device_id: \"\n  fps: 25\nenabled_plugins:\n  - '\n").expect("write yaml");
+        fs::write(
+            &path,
+            "camera_input:\n  device_id: \"\n  fps: 25\nenabled_plugins:\n  - '\n",
+        )
+        .expect("write yaml");
         let cfg = SmartCamConfig::load_from_file(&path);
         let _ = fs::remove_file(&path);
 

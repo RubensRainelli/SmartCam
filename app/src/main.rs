@@ -69,14 +69,20 @@ fn print_help() {
     println!("Copyright (c) 2026 Rubens Rainelli — https://github.com/RubensRainelli/\n");
     println!("Utilizzo:");
     println!("  SmartCam.exe                      Avvia l'interfaccia grafica con anteprima live (senza terminale)");
-    println!("  SmartCam.exe --minimized          Avvia ridotto nella System Tray (Modalità On-Demand)");
+    println!(
+        "  SmartCam.exe --minimized          Avvia ridotto nella System Tray (Modalità On-Demand)"
+    );
     println!("  SmartCam.exe --status [--json]    Mostra stato driver \"SmartCam\", webcam (con filtro IR) e SIMD");
     println!("  SmartCam.exe --benchmark [--json] Esegue il benchmark hardware (CPU AVX-512/AVX2/Scalar, Vulkan, OpenCL, CUDA, ROCm)");
     println!("  SmartCam.exe --register-driver    Registra il driver Virtual Camera \"SmartCam\" COM (UAC)");
     println!("  SmartCam.exe --unregister-driver  Rimuove il driver Virtual Camera \"SmartCam\" COM (UAC)");
     println!("  SmartCam.exe --headless           Esegue la pipeline Virtual Camera \"SmartCam\" da riga di comando");
-    println!("  SmartCam.exe --frames <N>         Elabora N fotogrammi in modalità headless ed esce");
-    println!("  SmartCam.exe --open-web-testbench Apre il test Side-by-Side (2 Webcam) nel browser");
+    println!(
+        "  SmartCam.exe --frames <N>         Elabora N fotogrammi in modalità headless ed esce"
+    );
+    println!(
+        "  SmartCam.exe --open-web-testbench Apre il test Side-by-Side (2 Webcam) nel browser"
+    );
     println!("  SmartCam.exe --set-aspect <4:3|16:9|1:1|9:16>");
     println!("  SmartCam.exe --set-resolution <1080p|900p|720p|540p|480p|360p|240p>");
     println!("  SmartCam.exe --set-fps <60|30|25|24|20|15|10>");
@@ -379,47 +385,75 @@ fn main() {
             eprintln!("[SmartCam] Errore salvataggio configurazione: {}", e);
             std::process::exit(1);
         }
-        println!("[SmartCam] Configurazione aggiornata in {}", config_path.display());
+        println!(
+            "[SmartCam] Configurazione aggiornata in {}",
+            config_path.display()
+        );
     }
 
     if flag_benchmark {
         let report = run_hardware_benchmark_suite(&repo_root, None);
         if flag_json {
             println!("{{");
-            println!("  \"hardware_fingerprint\": \"{}\",", report.hardware_fingerprint);
+            println!(
+                "  \"hardware_fingerprint\": \"{}\",",
+                report.hardware_fingerprint
+            );
             println!("  \"cpu_name\": \"{}\",", report.cpu_name);
             println!("  \"logical_cores\": {},", report.logical_cores);
             println!("  \"avx2_supported\": {},", report.avx2_supported);
             println!("  \"avx512_supported\": {},", report.avx512_supported);
-            println!("  \"recommended_profile_id\": \"{}\",", report.recommended_profile_id);
-            println!("  \"recommended_profile_label\": \"{}\",", report.recommended_profile_label);
-            println!("  \"recommended_backend\": \"{}\",", report.recommended_backend);
+            println!(
+                "  \"recommended_profile_id\": \"{}\",",
+                report.recommended_profile_id
+            );
+            println!(
+                "  \"recommended_profile_label\": \"{}\",",
+                report.recommended_profile_label
+            );
+            println!(
+                "  \"recommended_backend\": \"{}\",",
+                report.recommended_backend
+            );
             println!("  \"recommended_simd\": \"{}\",", report.recommended_simd);
-            println!("  \"recommended_ai_enabled\": {},", report.recommended_ai_enabled);
+            println!(
+                "  \"recommended_ai_enabled\": {},",
+                report.recommended_ai_enabled
+            );
             println!("  \"recommended_score\": {},", report.recommended_score);
             println!("  \"recommended_fps\": {:.1},", report.recommended_fps);
-            println!("  \"recommended_cpu_load_pct\": {:.1}", report.recommended_cpu_load_pct);
+            println!(
+                "  \"recommended_cpu_load_pct\": {:.1}",
+                report.recommended_cpu_load_pct
+            );
             println!("}}");
         } else {
             println!("=========================================================================");
             println!("  SmartCam — Benchmark Hardware & Classifica Prestazioni (1440x1080)");
             println!("=========================================================================");
-            println!("  CPU Rilevata : {} ({} core logici)", report.cpu_name, report.logical_cores);
+            println!(
+                "  CPU Rilevata : {} ({} core logici)",
+                report.cpu_name, report.logical_cores
+            );
             println!("  Fingerprint  : {}", report.hardware_fingerprint);
-            println!("  Supporto AVX : AVX2={} | AVX-512={}", report.avx2_supported, report.avx512_supported);
+            println!(
+                "  Supporto AVX : AVX2={} | AVX-512={}",
+                report.avx2_supported, report.avx512_supported
+            );
             println!("-------------------------------------------------------------------------");
             for p in &report.profiles {
-                let rec = if p.recommended { " ⭐ CONSIGLIATO" } else { "" };
+                let rec = if p.recommended {
+                    " ⭐ CONSIGLIATO"
+                } else {
+                    ""
+                };
                 if p.available {
                     println!(
                         "  [✅] {:<28} | {:>5} Pt | {:>5.1} FPS | ~{:>4.1}% CPU{}",
                         p.label, p.score, p.estimated_fps, p.estimated_cpu_load_pct, rec
                     );
                 } else {
-                    println!(
-                        "  [⚪] {:<28} | {}",
-                        p.label, p.availability_label
-                    );
+                    println!("  [⚪] {:<28} | {}", p.label, p.availability_label);
                 }
             }
             println!("-------------------------------------------------------------------------");
@@ -471,13 +505,14 @@ fn main() {
 
 #[cfg(target_os = "windows")]
 fn run_headless_pipeline(
-    repo_root: & std::path::Path,
+    repo_root: &std::path::Path,
     cfg: &mut SmartCamConfig,
     build_variant: &str,
     max_frames: u64,
 ) -> i32 {
     let diag = collect_diagnostics(repo_root, true);
-    let best_idx = select_best_default_camera_index(&diag.physical_cameras, cfg.camera_input.device_index);
+    let best_idx =
+        select_best_default_camera_index(&diag.physical_cameras, cfg.camera_input.device_index);
     cfg.camera_input.device_index = best_idx;
 
     let mut plugin_registry = PluginRegistry::new(repo_root);
@@ -521,7 +556,11 @@ fn run_headless_pipeline(
     println!(
         "  * Motore Compute   : {} (AI={})",
         pipeline.simd_backend_label,
-        if pipeline.active_ai_enabled { "ON" } else { "OFF" }
+        if pipeline.active_ai_enabled {
+            "ON"
+        } else {
+            "OFF"
+        }
     );
     println!(
         "  * Plugin Attivi    : {}",
@@ -542,19 +581,14 @@ fn run_headless_pipeline(
             raw_buf.resize(needed_bytes, 255);
         }
 
-        let (rw, rh) = if let Some((w, h)) = plugin_registry.read_active_camera_plugin_frame(&mut raw_buf, cam_w, cam_h) {
-            (w, h)
-        } else if let Some((w, h)) =
-            pipeline.read_camera_frame(&mut raw_buf, cam_w, cam_h)
+        let (rw, rh) = if let Some((w, h)) =
+            plugin_registry.read_active_camera_plugin_frame(&mut raw_buf, cam_w, cam_h)
         {
             (w, h)
+        } else if let Some((w, h)) = pipeline.read_camera_frame(&mut raw_buf, cam_w, cam_h) {
+            (w, h)
         } else {
-            generate_synthetic_bgra_frame(
-                &mut raw_buf,
-                cam_w,
-                cam_h,
-                frame_count,
-            );
+            generate_synthetic_bgra_frame(&mut raw_buf, cam_w, cam_h, frame_count);
             (cam_w, cam_h)
         };
 

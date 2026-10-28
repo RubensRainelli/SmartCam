@@ -1,0 +1,81 @@
+# Personal and Educational Free License (PEF License / PEFL)
+# Version 1.0 - 2026-05-26
+# Copyright (c) 2026 Rubens Rainelli
+#
+# Contact Details:
+#   Email: rubens@rainelli.it
+#   GitHub: https://github.com/RubensRainelli/
+#   Tel: (+39) 342 811 5882
+#
+# Personal and educational free use permitted.
+# Corporate, business or enterprise use prohibited without written authorization and fee.
+# The full license can be found in the LICENSE file.
+
+[workspace]
+resolver = "2"
+members = [
+    "app",
+    "crates/smartcam-engine",
+    "crates/smartcam-capture",
+    "crates/smartcam-mf-source",
+]
+
+[workspace.package]
+version = "2.0.0"
+edition = "2021"
+authors = ["Rubens Rainelli <rubens@rainelli.it>"]
+license = "LicenseRef-PEFL-1.0"
+license-file = "LICENSE"
+repository = "https://github.com/RubensRainelli/SmartCam"
+
+[workspace.dependencies]
+smartcam-engine = { path = "crates/smartcam-engine" }
+smartcam-capture = { path = "crates/smartcam-capture" }
+windows = { version = "0.58", features = [
+    "implement",
+    "Win32_Foundation",
+    "Win32_Media_MediaFoundation",
+    "Win32_Media_KernelStreaming",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Performance",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_System_SystemInformation",
+    "Win32_Security",
+    "Win32_Globalization",
+] }
+windows-core = "0.58"
+rcgen = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pemfile = "2.1"
+winresource = "0.1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[workspace.lints.clippy]
+too_many_arguments = "allow"
+missing_safety_doc = "allow"
+needless_range_loop = "allow"
+identity_op = "allow"
+not_unsafe_ptr_arg_deref = "allow"
+type_complexity = "allow"
+manual_range_contains = "allow"
+ptr_arg = "allow"
+upper_case_acronyms = "allow"
+manual_c_str_literals = "allow"
+chunks_exact_to_as_chunks = "allow"
+collapsible_if = "allow"
+manual_clamp = "allow"
+manual_dangling_ptr = "allow"
+manual_is_multiple_of = "allow"
+unnecessary_cast = "allow"
+unnecessary_mut_passed = "allow"
+derivable_impls = "allow"
+question_mark = "allow"

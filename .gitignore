@@ -7,11 +7,19 @@
 .pefl_accepted_*
 **/.pefl_accepted_*
 
+# Local Code Signing Certificates & Secrets (NEVER COMMIT)
+.certs/
+*.pfx
+*.p12
+*.key
+*.pem
+
 # Local hardware benchmark & runtime state (machine-specific)
 config/hardware_benchmark.yaml
 config/plugins_state.conf
 
 # Rust intermediate build artifacts
+target/
 app/target/
 platforms/windows/installer_builder/target/
 **/*.rs.bk

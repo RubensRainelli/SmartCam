@@ -17,18 +17,22 @@
 
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::fs;
-use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
+use std::io::{Cursor, Read, Write};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair, SanType};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+use rustls::{ServerConfig, ServerConnection, StreamOwned};
+
 use crate::win32_ffi::{
     to_wstring, BitmapData, GdipBitmapLockBits, GdipBitmapUnlockBits, GdipDisposeImage,
-    GdipGetImageHeight, GdipGetImageWidth, GdiplusShutdown, GdiplusStartup, GdiplusStartupInput,
-    GpRect, ImageLockModeRead, PixelFormat32bppARGB, ShellExecuteW, FALSE, SW_HIDE,
+    GdipGetImageHeight, GdipGetImageWidth, GdiplusStartup, GdiplusStartupInput, GpRect,
+    ImageLockModeRead, PixelFormat32bppARGB, ShellExecuteW, FALSE, SW_HIDE,
 };
 
 /// Universal C ABI version for SmartCam external plugins (`.dll` / `.so`).
@@ -306,8 +310,157 @@ pub fn detect_direct_hotspot_or_usb_ip() -> Option<String> {
 }
 
 // ============================================================================
-// Shared Frame State & Built-in Smartphone HTTP Server + MJPEG Pull Client
+// Pure Rust Endpoint Parser, TLS Certificate Generator & Smartphone Server
 // ============================================================================
+
+/// Connection state for the Smartphone Camera Plugin (`phone_camera_source`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum PhoneConnectionState {
+    /// Plugin disabled or closed.
+    Disconnected = 0,
+    /// Waiting for smartphone stream; renders HD Pairing Card Frame.
+    PairingStandby = 1,
+    /// Actively receiving BGRA32 video frames from the smartphone.
+    StreamingActive = 2,
+}
+
+/// Parsed network endpoint for Smartphone Wi-Fi / USB / RTSP camera streaming,
+/// ported from `common/plugins/phone_camera_plugin.cpp` (`ParseEndpointUri`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParsedPhoneEndpoint {
+    pub scheme: String,
+    pub host: String,
+    pub port: u16,
+    pub path: String,
+    pub is_usb: bool,
+}
+
+impl Default for ParsedPhoneEndpoint {
+    fn default() -> Self {
+        Self {
+            scheme: "http".to_string(),
+            host: "192.168.1.100".to_string(),
+            port: DEFAULT_PHONE_SERVER_PORT,
+            path: "/video".to_string(),
+            is_usb: false,
+        }
+    }
+}
+
+impl ParsedPhoneEndpoint {
+    /// Parses an endpoint URI (e.g. `"http://192.168.1.100:8080/video"`, `"rtsp://192.168.1.120:8554/live"`,
+    /// or `"usb://127.0.0.1:8080/video"`) into scheme, host, port, path, and USB flag.
+    pub fn parse(uri: &str) -> Self {
+        let mut out = Self::default();
+        let trimmed = uri.trim();
+        if trimmed.is_empty() {
+            return out;
+        }
+
+        let work = if let Some((scheme_part, rest)) = trimmed.split_once("://") {
+            out.scheme = scheme_part.trim().to_ascii_lowercase();
+            rest
+        } else {
+            trimmed
+        };
+
+        let (host_port, path_part) = match work.find('/') {
+            Some(idx) => (&work[..idx], &work[idx..]),
+            None => (work, "/video"),
+        };
+        out.path = path_part.to_string();
+
+        if let Some((h, p)) = host_port.split_once(':') {
+            out.host = h.trim().to_string();
+            if let Ok(parsed_port) = p.trim().parse::<u16>() {
+                if parsed_port > 0 {
+                    out.port = parsed_port;
+                }
+            }
+        } else if !host_port.trim().is_empty() {
+            out.host = host_port.trim().to_string();
+            out.port = if out.scheme == "rtsp" {
+                8554
+            } else {
+                DEFAULT_PHONE_SERVER_PORT
+            };
+        }
+
+        out.is_usb = out.scheme == "usb"
+            || out.host == "127.0.0.1"
+            || out.host.eq_ignore_ascii_case("localhost");
+        out
+    }
+}
+
+/// Self-signed TLS 1.2/1.3 server configuration and DER certificate generated in-process via `rcgen` + `rustls`.
+pub struct PhoneTlsMaterial {
+    pub server_config: Arc<ServerConfig>,
+    pub cert_der: Vec<u8>,
+}
+
+/// Generates an in-memory self-signed X.509 certificate and `rustls::ServerConfig` with Subject Alternative Names
+/// for `localhost`, `127.0.0.1`, `192.168.137.1` (Windows Mobile Hotspot), and the current LAN / USB Tethering IP.
+pub fn generate_phone_tls_material() -> Option<PhoneTlsMaterial> {
+    let mut params = CertificateParams::default();
+    let mut dn = DistinguishedName::new();
+    dn.push(DnType::CommonName, "SmartCam Mobile HTTPS");
+    params.distinguished_name = dn;
+
+    let mut sans = Vec::new();
+    if let Ok(localhost_ia5) = "localhost".to_string().try_into() {
+        sans.push(SanType::DnsName(localhost_ia5));
+    }
+
+    let mut ip_sans = vec![
+        IpAddr::from([127, 0, 0, 1]),
+        IpAddr::from([192, 168, 137, 1]),
+    ];
+    if let Ok(lan_ip) = detect_local_lan_ip().parse::<IpAddr>() {
+        if !ip_sans.contains(&lan_ip) {
+            ip_sans.push(lan_ip);
+        }
+    }
+    if let Some(direct_ip) =
+        detect_direct_hotspot_or_usb_ip().and_then(|s| s.parse::<IpAddr>().ok())
+    {
+        if !ip_sans.contains(&direct_ip) {
+            ip_sans.push(direct_ip);
+        }
+    }
+    for ip in ip_sans {
+        sans.push(SanType::IpAddress(ip));
+    }
+    params.subject_alt_names = sans;
+
+    let key_pair = KeyPair::generate().ok()?;
+    let cert = params.self_signed(&key_pair).ok()?;
+    let cert_der_bytes = cert.der().as_ref().to_vec();
+    let cert_der = CertificateDer::from(cert_der_bytes.clone());
+    let key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_pair.serialize_der()));
+
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let server_config = ServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .ok()?
+        .with_no_client_auth()
+        .with_single_cert(vec![cert_der], key_der)
+        .ok()?;
+
+    Some(PhoneTlsMaterial {
+        server_config: Arc::new(server_config),
+        cert_der: cert_der_bytes,
+    })
+}
+
+/// Returns the cached in-process `PhoneTlsMaterial` (`rcgen` + `rustls`), initializing it once on first use.
+pub fn get_or_init_phone_tls_material() -> Option<&'static PhoneTlsMaterial> {
+    static TLS_MATERIAL: OnceLock<Option<PhoneTlsMaterial>> = OnceLock::new();
+    TLS_MATERIAL
+        .get_or_init(generate_phone_tls_material)
+        .as_ref()
+}
 
 struct PhoneFrameSharedState {
     bgra: Vec<u8>,
@@ -335,11 +488,20 @@ struct PhoneCameraServer {
     bound_port: Arc<AtomicU16>,
     received_frames: Arc<AtomicU64>,
     tcp_connections: Arc<AtomicU64>,
+    active_clients: Arc<AtomicUsize>,
     last_client_log: Arc<Mutex<String>>,
     shared_frame: Arc<Mutex<PhoneFrameSharedState>>,
     remote_pull_url: Arc<Mutex<String>>,
     http_thread: Option<thread::JoinHandle<()>>,
+    tls_thread: Option<thread::JoinHandle<()>>,
     pull_thread: Option<thread::JoinHandle<()>>,
+}
+
+struct ActiveClientGuard(Arc<AtomicUsize>);
+impl Drop for ActiveClientGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 impl PhoneCameraServer {
@@ -354,6 +516,7 @@ impl PhoneCameraServer {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let is_running = Arc::new(AtomicBool::new(false));
         let bound_port = Arc::new(AtomicU16::new(port));
+        let active_clients = Arc::new(AtomicUsize::new(0));
 
         let mut srv = Self {
             stop_flag,
@@ -361,10 +524,12 @@ impl PhoneCameraServer {
             bound_port,
             received_frames,
             tcp_connections,
+            active_clients,
             last_client_log,
             shared_frame,
             remote_pull_url,
             http_thread: None,
+            tls_thread: None,
             pull_thread: None,
         };
 
@@ -378,6 +543,7 @@ impl PhoneCameraServer {
         let port_http = Arc::clone(&self.bound_port);
         let frames_http = Arc::clone(&self.received_frames);
         let conns_http = Arc::clone(&self.tcp_connections);
+        let active_http = Arc::clone(&self.active_clients);
         let log_http = Arc::clone(&self.last_client_log);
         let shared_http = Arc::clone(&self.shared_frame);
 
@@ -399,12 +565,19 @@ impl PhoneCameraServer {
             running_http.store(true, Ordering::SeqCst);
 
             let jh = thread::spawn(move || {
+                const MAX_CONCURRENT_HTTP_CLIENTS: usize = 8;
                 while !stop_http.load(Ordering::Relaxed) {
                     match listener.accept() {
                         Ok((stream, peer_addr)) => {
                             if stop_http.load(Ordering::Relaxed) {
                                 break;
                             }
+                            if active_http.load(Ordering::Relaxed) >= MAX_CONCURRENT_HTTP_CLIENTS {
+                                let _ = stream.shutdown(std::net::Shutdown::Both);
+                                continue;
+                            }
+                            active_http.fetch_add(1, Ordering::Relaxed);
+                            let client_guard = ActiveClientGuard(Arc::clone(&active_http));
                             conns_http.fetch_add(1, Ordering::Relaxed);
                             if let Ok(mut lg) = log_http.lock() {
                                 *lg = format!("Connessione TCP da {}", peer_addr.ip());
@@ -414,6 +587,7 @@ impl PhoneCameraServer {
                             let log_conn = Arc::clone(&log_http);
                             let shared_conn = Arc::clone(&shared_http);
                             thread::spawn(move || {
+                                let _guard = client_guard;
                                 handle_phone_http_client(
                                     stream,
                                     peer_addr,
@@ -440,12 +614,39 @@ impl PhoneCameraServer {
             running_http.store(false, Ordering::SeqCst);
         }
 
-        // Also spawn the local TLS/HTTPS loopback terminator (`127.0.0.1:<tls_port>`) so that
-        // `0.0.0.0:<port>` simultaneously serves BOTH `http://<IP>:<port>` AND `https://<IP>:<port>`!
+        // Also spawn the native Rust TLS/HTTPS loopback terminator (`127.0.0.1:<tls_port>`) using `rcgen` + `rustls`
+        // so that both `0.0.0.0:<port>` (via single-port `0x16 0x03` multiplexing) and `127.0.0.1:<tls_port>`
+        // serve TLS 1.2/1.3 in-process with zero external child processes!
+        let _ = get_or_init_phone_tls_material();
         let stop_tls = Arc::clone(&self.stop_flag);
-        thread::spawn(move || {
-            run_local_tls_loopback_terminator(port, stop_tls);
+        let frames_tls = Arc::clone(&self.received_frames);
+        let log_tls = Arc::clone(&self.last_client_log);
+        let shared_tls = Arc::clone(&self.shared_frame);
+        let tls_port = if port <= 64000 {
+            port + 1000
+        } else {
+            port - 1000
+        };
+        let tls_bind_addr = format!("127.0.0.1:{}", tls_port);
+        let mut bound_tls_listener: Option<TcpListener> = None;
+        for _ in 0..8 {
+            if let Ok(l) = TcpListener::bind(&tls_bind_addr) {
+                bound_tls_listener = Some(l);
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        let tls_jh = thread::spawn(move || {
+            run_local_tls_loopback_terminator(
+                bound_tls_listener,
+                port,
+                stop_tls,
+                frames_tls,
+                log_tls,
+                shared_tls,
+            );
         });
+        self.tls_thread = Some(tls_jh);
 
         // Also spawn the remote HTTP MJPEG / Snapshot puller for external apps (IP Webcam / DroidCam / RTSP-HTTP bridge)
         let stop_pull = Arc::clone(&self.stop_flag);
@@ -467,13 +668,23 @@ impl PhoneCameraServer {
                 &SocketAddr::from(([127, 0, 0, 1], port)),
                 Duration::from_millis(30),
             );
-            let tls_port = if port <= 64000 { port + 1000 } else { port - 1000 };
+            let tls_port = if port <= 64000 {
+                port + 1000
+            } else {
+                port - 1000
+            };
             let _ = TcpStream::connect_timeout(
                 &SocketAddr::from(([127, 0, 0, 1], tls_port)),
                 Duration::from_millis(30),
             );
         }
         if let Some(jh) = self.http_thread.take() {
+            let _ = jh.join();
+        }
+        if let Some(jh) = self.tls_thread.take() {
+            let _ = jh.join();
+        }
+        if let Some(jh) = self.pull_thread.take() {
             let _ = jh.join();
         }
         self.is_running.store(false, Ordering::SeqCst);
@@ -503,32 +714,96 @@ fn handle_phone_http_client(
     let _ = stream.set_read_timeout(Some(Duration::from_millis(5000)));
     let _ = stream.set_write_timeout(Some(Duration::from_millis(5000)));
 
-    let mut read_buf = Vec::with_capacity(65536);
+    let mut initial_buf = Vec::with_capacity(16384);
+    let mut temp = [0u8; 8192];
+    let first_deadline = Instant::now() + Duration::from_millis(5000);
+
+    while initial_buf.len() < 3 && !stop_flag.load(Ordering::Relaxed) {
+        if Instant::now() >= first_deadline {
+            return;
+        }
+        match stream.read(&mut temp) {
+            Ok(0) => return,
+            Ok(n) => initial_buf.extend_from_slice(&temp[..n]),
+            Err(ref e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::Interrupted =>
+            {
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(_) => return,
+        }
+    }
+
+    // Auto-detect TLS ClientHello (`0x16 0x03`) on the SAME port (`8080`):
+    // Terminate TLS 1.2/1.3 directly in-process in pure Rust via `rustls::ServerConnection` + `StreamOwned`
+    // so `https://<IP>:8080` works out-of-the-box on the exact same port as `http://<IP>:8080` with <1MB RAM!
+    if initial_buf.len() >= 3 && initial_buf[0] == 0x16 && initial_buf[1] == 0x03 {
+        if let Ok(mut lg) = last_client_log.lock() {
+            *lg = format!(
+                "🔒 Connessione HTTPS sicura da {} (Porta {})",
+                peer_addr.ip(),
+                server_port
+            );
+        }
+        let Some(tls_mat) = get_or_init_phone_tls_material() else {
+            return;
+        };
+        let Ok(mut tls_conn) = ServerConnection::new(Arc::clone(&tls_mat.server_config)) else {
+            return;
+        };
+        let mut cursor = Cursor::new(&initial_buf[..]);
+        while (cursor.position() as usize) < initial_buf.len() {
+            if tls_conn.read_tls(&mut cursor).is_err() {
+                return;
+            }
+            if tls_conn.process_new_packets().is_err() {
+                return;
+            }
+        }
+        let mut tls_stream = StreamOwned::new(tls_conn, stream);
+        serve_phone_http_stream(
+            &mut tls_stream,
+            Vec::with_capacity(65536),
+            peer_addr,
+            server_port,
+            &stop_flag,
+            &received_frames,
+            &last_client_log,
+            &shared_frame,
+        );
+        return;
+    }
+
+    serve_phone_http_stream(
+        &mut stream,
+        initial_buf,
+        peer_addr,
+        server_port,
+        &stop_flag,
+        &received_frames,
+        &last_client_log,
+        &shared_frame,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn serve_phone_http_stream<S: Read + Write>(
+    stream: &mut S,
+    mut read_buf: Vec<u8>,
+    peer_addr: SocketAddr,
+    server_port: u16,
+    stop_flag: &Arc<AtomicBool>,
+    received_frames: &Arc<AtomicU64>,
+    last_client_log: &Arc<Mutex<String>>,
+    shared_frame: &Arc<Mutex<PhoneFrameSharedState>>,
+) {
     let mut temp = [0u8; 16384];
 
     // Support persistent keep-alive connections so mobile browsers can stream 25-30 FPS over a single socket
     while !stop_flag.load(Ordering::Relaxed) {
         let req_deadline = Instant::now() + Duration::from_millis(5000);
         let header_end = loop {
-            // Auto-detect TLS ClientHello (`0x16 0x03`) on the SAME port (`8080`):
-            // Transparently bridge the TLS connection through our local `.NET SslStream` TLS terminator
-            // so `https://<IP>:8080` works out-of-the-box on the exact same port as `http://<IP>:8080`!
-            if read_buf.len() >= 3 && read_buf[0] == 0x16 && read_buf[1] == 0x03 {
-                let tls_loopback_port = if server_port <= 64000 {
-                    server_port + 1000
-                } else {
-                    server_port - 1000
-                };
-                if let Ok(mut lg) = last_client_log.lock() {
-                    *lg = format!(
-                        "🔒 Connessione HTTPS sicura da {} (Porta {})",
-                        peer_addr.ip(),
-                        server_port
-                    );
-                }
-                bridge_tls_connection_to_loopback(stream, read_buf, tls_loopback_port);
-                return;
-            }
             if let Some(pos) = find_subslice(&read_buf, b"\r\n\r\n") {
                 break Some(pos);
             }
@@ -618,16 +893,19 @@ fn handle_phone_http_client(
                 && q_h <= 4096
                 && body.len() == (q_w as usize) * (q_h as usize) * 4
             {
-                let mut bgra = body.to_vec();
-                if q_fmt != "bgra" {
-                    // Convert HTML5 Canvas ImageData RGBA -> SmartCam BGRA32
-                    for px in bgra.chunks_exact_mut(4) {
-                        px.swap(0, 2);
-                        px[3] = 255;
-                    }
-                }
                 if let Ok(mut guard) = shared_frame.lock() {
-                    guard.bgra = bgra;
+                    let needed = body.len();
+                    if guard.bgra.len() != needed {
+                        guard.bgra.resize(needed, 255);
+                    }
+                    guard.bgra.copy_from_slice(body);
+                    if q_fmt != "bgra" {
+                        // Convert HTML5 Canvas ImageData RGBA -> SmartCam BGRA32 in-place
+                        for px in guard.bgra.chunks_exact_mut(4) {
+                            px.swap(0, 2);
+                            px[3] = 255;
+                        }
+                    }
                     guard.width = q_w;
                     guard.height = q_h;
                     guard.last_received = Some(Instant::now());
@@ -711,6 +989,9 @@ fn handle_phone_http_client(
             return;
         }
         read_buf.drain(..total_needed);
+        if read_buf.capacity() > 262_144 {
+            read_buf.shrink_to(65536);
+        }
     }
 }
 
@@ -742,12 +1023,9 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
-/// Decodes in-memory JPEG, PNG, or BMP bytes into top-down `BGRA32` pixels via native Windows GDI+ `IStream`.
-pub fn decode_image_bytes_gdiplus(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
-    if bytes.len() < 16 {
-        return None;
-    }
-    unsafe {
+fn ensure_gdiplus_initialized() -> bool {
+    static GDIPLUS_TOKEN: OnceLock<usize> = OnceLock::new();
+    let tok = *GDIPLUS_TOKEN.get_or_init(|| unsafe {
         let mut token: usize = 0;
         let input = GdiplusStartupInput {
             GdiplusVersion: 1,
@@ -755,20 +1033,29 @@ pub fn decode_image_bytes_gdiplus(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
             SuppressBackgroundThread: FALSE,
             SuppressExternalCodecs: FALSE,
         };
-        if GdiplusStartup(&mut token, &input, std::ptr::null_mut()) != 0 {
-            return None;
+        if GdiplusStartup(&mut token, &input, std::ptr::null_mut()) == 0 {
+            token
+        } else {
+            0
         }
+    });
+    tok != 0
+}
 
+/// Decodes in-memory JPEG, PNG, or BMP bytes into top-down `BGRA32` pixels via native Windows GDI+ `IStream`.
+pub fn decode_image_bytes_gdiplus(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
+    if bytes.len() < 16 || !ensure_gdiplus_initialized() {
+        return None;
+    }
+    unsafe {
         let hglobal = GlobalAlloc(GMEM_MOVEABLE, bytes.len());
         if hglobal.is_null() {
-            GdiplusShutdown(token);
             return None;
         }
 
         let locked_ptr = GlobalLock(hglobal) as *mut u8;
         if locked_ptr.is_null() {
             let _ = GlobalFree(hglobal);
-            GdiplusShutdown(token);
             return None;
         }
         std::ptr::copy_nonoverlapping(bytes.as_ptr(), locked_ptr, bytes.len());
@@ -777,7 +1064,6 @@ pub fn decode_image_bytes_gdiplus(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
         let mut stream: *mut c_void = std::ptr::null_mut();
         if CreateStreamOnHGlobal(hglobal, 1, &mut stream) != 0 || stream.is_null() {
             let _ = GlobalFree(hglobal);
-            GdiplusShutdown(token);
             return None;
         }
 
@@ -785,7 +1071,6 @@ pub fn decode_image_bytes_gdiplus(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
         let status = GdipCreateBitmapFromStream(stream, &mut bmp);
         if status != 0 || bmp.is_null() {
             release_com_interface(stream);
-            GdiplusShutdown(token);
             return None;
         }
 
@@ -797,7 +1082,6 @@ pub fn decode_image_bytes_gdiplus(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
         if width == 0 || height == 0 || width > 4096 || height > 4096 {
             let _ = GdipDisposeImage(bmp);
             release_com_interface(stream);
-            GdiplusShutdown(token);
             return None;
         }
 
@@ -819,7 +1103,6 @@ pub fn decode_image_bytes_gdiplus(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
         {
             let _ = GdipDisposeImage(bmp);
             release_com_interface(stream);
-            GdiplusShutdown(token);
             return None;
         }
 
@@ -842,7 +1125,6 @@ pub fn decode_image_bytes_gdiplus(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
         let _ = GdipBitmapUnlockBits(bmp, &mut bdata);
         let _ = GdipDisposeImage(bmp);
         release_com_interface(stream);
-        GdiplusShutdown(token);
         Some((out, width, height))
     }
 }
@@ -891,8 +1173,9 @@ fn run_external_phone_pull_worker(
 
         if let Some((host, port, path)) = parse_http_endpoint(&target_url) {
             // Do not pull from our own local server port
-            let is_self = (host == local_ip || host == "127.0.0.1" || host.eq_ignore_ascii_case("localhost"))
-                && port == local_server_port;
+            let is_self =
+                (host == local_ip || host == "127.0.0.1" || host.eq_ignore_ascii_case("localhost"))
+                    && port == local_server_port;
             let is_default_placeholder = host == "192.168.1.100" && port == 8080;
 
             if !is_self && !is_default_placeholder {
@@ -958,6 +1241,58 @@ fn parse_http_endpoint(raw_url: &str) -> Option<(String, u16, String)> {
     Some((host, port, path.to_string()))
 }
 
+/// Extracts a complete JPEG frame from an HTTP snapshot or `multipart/x-mixed-replace` MJPEG stream buffer.
+/// Supports both explicit multipart `Content-Length` headers after `--boundary` markers and raw JPEG
+/// SOI (`0xFF 0xD8 0xFF`) / EOI (`0xFF 0xD9`) delimiters. Returns `Some((jpeg_bytes, bytes_consumed))`.
+pub fn extract_mjpeg_frame_from_buffer(buf: &[u8]) -> Option<(Vec<u8>, usize)> {
+    // 1. Check for multipart MJPEG boundary header with explicit `Content-Length`
+    if let Some(boundary_pos) = find_subslice(buf, b"--") {
+        let after_boundary = &buf[boundary_pos..];
+        if let Some(hdr_end_rel) = find_subslice(after_boundary, b"\r\n\r\n") {
+            let hdr_slice = &after_boundary[..hdr_end_rel];
+            let hdr_str = String::from_utf8_lossy(hdr_slice);
+            let mut declared_len: Option<usize> = None;
+            let mut is_jpeg_part = false;
+            for line in hdr_str.lines() {
+                if let Some((k, v)) = line.split_once(':') {
+                    let k_low = k.trim().to_ascii_lowercase();
+                    let v_trim = v.trim();
+                    if k_low == "content-length" {
+                        declared_len = v_trim.parse::<usize>().ok();
+                    } else if k_low == "content-type"
+                        && v_trim.to_ascii_lowercase().contains("jpeg")
+                    {
+                        is_jpeg_part = true;
+                    }
+                }
+            }
+            let payload_start = boundary_pos + hdr_end_rel + 4;
+            if let Some(len) = declared_len {
+                if len >= 4 && (is_jpeg_part || payload_start + 3 <= buf.len()) {
+                    if buf.len() >= payload_start + len {
+                        let candidate = &buf[payload_start..payload_start + len];
+                        if candidate.starts_with(&[0xFF, 0xD8]) {
+                            return Some((candidate.to_vec(), payload_start + len));
+                        }
+                    } else {
+                        // Wait for more bytes to complete the declared Content-Length
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Standard JPEG SOI (0xFF 0xD8 0xFF) .. EOI (0xFF 0xD9) marker extraction
+    if let Some(soi) = find_subslice(buf, &[0xFF, 0xD8, 0xFF]) {
+        if let Some(eoi_rel) = find_subslice(&buf[soi + 3..], &[0xFF, 0xD9]) {
+            let end = soi + 3 + eoi_rel + 2;
+            return Some((buf[soi..end].to_vec(), end));
+        }
+    }
+    None
+}
+
 fn fetch_http_jpeg_frame(host: &str, port: u16, path: &str) -> Option<Vec<u8>> {
     let addr_str = format!("{}:{}", host, port);
     let sock_addr = addr_str.to_socket_addrs().ok()?.next()?;
@@ -978,34 +1313,33 @@ fn fetch_http_jpeg_frame(host: &str, port: u16, path: &str) -> Option<Vec<u8>> {
             Ok(0) => break,
             Ok(n) => {
                 buf.extend_from_slice(&chunk[..n]);
-                // Check if we already received a complete JPEG image (SOI 0xFF 0xD8 .. EOI 0xFF 0xD9)
-                if let Some(soi) = find_subslice(&buf, &[0xFF, 0xD8, 0xFF]) {
-                    if let Some(eoi_rel) = find_subslice(&buf[soi + 3..], &[0xFF, 0xD9]) {
-                        let end = soi + 3 + eoi_rel + 2;
-                        return Some(buf[soi..end].to_vec());
-                    }
+                if let Some((jpeg_bytes, _consumed)) = extract_mjpeg_frame_from_buffer(&buf) {
+                    return Some(jpeg_bytes);
                 }
             }
             Err(_) => break,
         }
     }
 
+    if let Some((jpeg_bytes, _)) = extract_mjpeg_frame_from_buffer(&buf) {
+        return Some(jpeg_bytes);
+    }
     if let Some(soi) = find_subslice(&buf, &[0xFF, 0xD8, 0xFF]) {
         return Some(buf[soi..].to_vec());
     }
     None
 }
 
-/// Bridges an incoming TLS connection (`ClientHello` starting with `0x16 0x03`) received on the main
-/// Smartphone port (`0.0.0.0:8080`) to our local `.NET SslStream` TLS terminator (`127.0.0.1:<tls_loopback_port>`),
-/// which decrypts the HTTPS stream and forwards the plain HTTP request back to `127.0.0.1:8080`.
+/// Bridges an incoming TLS connection (`ClientHello` starting with `0x16 0x03`) to the local
+/// pure-Rust `rustls` TLS loopback listener (`127.0.0.1:<tls_loopback_port>`).
 fn bridge_tls_connection_to_loopback(
     mut client_stream: TcpStream,
     initial_bytes: Vec<u8>,
     tls_loopback_port: u16,
 ) {
     let target = SocketAddr::from(([127, 0, 0, 1], tls_loopback_port));
-    let Ok(mut tls_stream) = TcpStream::connect_timeout(&target, Duration::from_millis(1200)) else {
+    let Ok(mut tls_stream) = TcpStream::connect_timeout(&target, Duration::from_millis(1200))
+    else {
         return;
     };
     let _ = tls_stream.set_nodelay(true);
@@ -1046,102 +1380,83 @@ fn bridge_tls_connection_to_loopback(
     let _ = c2t.join();
 }
 
-/// Runs a persistent, hidden local `.NET SslStream` TLS 1.2/1.3 terminator on `127.0.0.1:<tls_port>`
-/// using a self-signed RSA-2048 X.509 certificate so mobile browsers can open `https://<IP>:<port>`
-/// on the exact same port (`8080`) and obtain a Secure Context (`window.isSecureContext === true`)
-/// for `navigator.mediaDevices.getUserMedia()` and `enumerateDevices()`.
-fn run_local_tls_loopback_terminator(http_port: u16, stop_flag: Arc<AtomicBool>) {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
+/// Runs an in-process 100% pure-Rust TLS 1.2/1.3 listener (`rcgen` + `rustls`) on `127.0.0.1:<tls_port>`
+/// with `< 1 MB` RAM overhead and zero external subprocesses (`powershell.exe` / `.NET SslStream` completely removed).
+fn run_local_tls_loopback_terminator(
+    bound_listener: Option<TcpListener>,
+    http_port: u16,
+    stop_flag: Arc<AtomicBool>,
+    received_frames: Arc<AtomicU64>,
+    last_client_log: Arc<Mutex<String>>,
+    shared_frame: Arc<Mutex<PhoneFrameSharedState>>,
+) {
     let tls_port = if http_port <= 64000 {
         http_port + 1000
     } else {
         http_port - 1000
     };
 
-    let lan_ip = detect_local_lan_ip();
-    let ps_script = format!(
-        r#"
-$ErrorActionPreference = 'SilentlyContinue'
-[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls13
-$rsa = [System.Security.Cryptography.RSA]::Create(2048)
-$req = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
-    'CN=SmartCam Mobile HTTPS',
-    $rsa,
-    [System.Security.Cryptography.HashAlgorithmName]::SHA256,
-    [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
-)
-$san = [System.Security.Cryptography.X509Certificates.SubjectAlternativeNameBuilder]::new()
-$san.AddIpAddress([System.Net.IPAddress]::Parse('192.168.137.1'))
-$san.AddIpAddress([System.Net.IPAddress]::Parse('{lan_ip}'))
-$san.AddIpAddress([System.Net.IPAddress]::Parse('127.0.0.1'))
-$san.AddDnsName('localhost')
-$req.CertificateExtensions.Add($san.Build())
-$rawCert = $req.CreateSelfSigned([DateTimeOffset]::UtcNow.AddDays(-2), [DateTimeOffset]::UtcNow.AddYears(5))
-$pfxBytes = $rawCert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx, 'smartcam')
-$serverCert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($pfxBytes, 'smartcam')
+    let listener = match bound_listener {
+        Some(l) => l,
+        None => match TcpListener::bind(("127.0.0.1", tls_port)) {
+            Ok(l) => l,
+            Err(_) => return,
+        },
+    };
+    let _ = listener.set_nonblocking(true);
 
-$listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, {tls_port})
-$listener.Start()
+    let Some(tls_mat) = get_or_init_phone_tls_material() else {
+        return;
+    };
+    let server_config = Arc::clone(&tls_mat.server_config);
 
-$rsPool = [runspacefactory]::CreateRunspacePool(1, 16)
-$rsPool.Open()
+    while !stop_flag.load(Ordering::Relaxed) {
+        match listener.accept() {
+            Ok((stream, peer_addr)) => {
+                if stop_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+                let _ = stream.set_nonblocking(false);
+                let _ = stream.set_nodelay(true);
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(5000)));
+                let _ = stream.set_write_timeout(Some(Duration::from_millis(5000)));
 
-$clientHandler = {{
-    param($tcpClient, $certBytes, $httpPort)
-    try {{
-        $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certBytes, 'smartcam')
-        $netStream = $tcpClient.GetStream()
-        $sslStream = [System.Net.Security.SslStream]::new($netStream, $false)
-        $sslStream.ReadTimeout = 6000
-        $sslStream.WriteTimeout = 6000
-        $sslStream.AuthenticateAsServer($cert, $false, ([System.Security.Authentication.SslProtocols]::Tls12 -bor [System.Security.Authentication.SslProtocols]::Tls13), $false)
+                let cfg_conn = Arc::clone(&server_config);
+                let stop_conn = Arc::clone(&stop_flag);
+                let frames_conn = Arc::clone(&received_frames);
+                let log_conn = Arc::clone(&last_client_log);
+                let shared_conn = Arc::clone(&shared_frame);
 
-        $backend = [System.Net.Sockets.TcpClient]::new('127.0.0.1', $httpPort)
-        $backend.NoDelay = $true
-        $bStream = $backend.GetStream()
-        $bStream.ReadTimeout = 6000
-        $bStream.WriteTimeout = 6000
-
-        $t1 = $sslStream.CopyToAsync($bStream)
-        $t2 = $bStream.CopyToAsync($sslStream)
-        [System.Threading.Tasks.Task]::WaitAny(@($t1, $t2), 15000) | Out-Null
-        $backend.Close()
-        $sslStream.Close()
-    }} catch {{
-    }} finally {{
-        $tcpClient.Close()
-    }}
-}}
-
-while ($true) {{
-    $client = $listener.AcceptTcpClient()
-    $ps = [powershell]::Create().AddScript($clientHandler).AddArgument($client).AddArgument($pfxBytes).AddArgument({http_port})
-    $ps.RunspacePool = $rsPool
-    $null = $ps.BeginInvoke()
-}}
-"#
-    );
-
-    if let Ok(mut child) = std::process::Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &ps_script])
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-    {
-        while !stop_flag.load(Ordering::Relaxed) {
-            if let Ok(Some(_)) = child.try_wait() {
-                break;
+                thread::spawn(move || {
+                    let Ok(tls_conn) = ServerConnection::new(cfg_conn) else {
+                        return;
+                    };
+                    let mut tls_stream = StreamOwned::new(tls_conn, stream);
+                    serve_phone_http_stream(
+                        &mut tls_stream,
+                        Vec::with_capacity(65536),
+                        peer_addr,
+                        http_port,
+                        &stop_conn,
+                        &frames_conn,
+                        &log_conn,
+                        &shared_conn,
+                    );
+                });
             }
-            thread::sleep(Duration::from_millis(200));
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(8));
+            }
+            Err(_) => {
+                thread::sleep(Duration::from_millis(20));
+            }
         }
-        let _ = child.kill();
     }
 }
 
 fn build_smartphone_transmitter_html(lan_ip: &str, port: u16) -> String {
     let http_url = format!("http://{}:{}", lan_ip, port);
-    let https_url = format!("https://{}:{}", lan_ip, port);
+    let _https_url = format!("https://{}:{}", lan_ip, port);
     format!(
         r##"<!DOCTYPE html>
 <html lang="it">
@@ -2104,7 +2419,9 @@ impl PluginRegistry {
         let shared_frame = Arc::new(Mutex::new(PhoneFrameSharedState::default()));
         let received_frames = Arc::new(AtomicU64::new(0));
         let tcp_connections = Arc::new(AtomicU64::new(0));
-        let last_client_log = Arc::new(Mutex::new("In attesa di pacchetti dal telefono...".to_string()));
+        let last_client_log = Arc::new(Mutex::new(
+            "In attesa di pacchetti dal telefono...".to_string(),
+        ));
         let remote_pull_url = Arc::new(Mutex::new(String::new()));
 
         let mut registry = Self {
@@ -2196,7 +2513,11 @@ impl PluginRegistry {
 
     /// Returns the full HTTP URL (`http://<LAN_IP>:<PORT>`) to open on the smartphone browser.
     pub fn phone_server_url(&self) -> String {
-        format!("http://{}:{}", self.local_lan_ip(), self.phone_server_port())
+        format!(
+            "http://{}:{}",
+            self.local_lan_ip(),
+            self.phone_server_port()
+        )
     }
 
     /// Returns `true` if the built-in Smartphone HTTP Server is actively listening on `phone_server_port()`.
@@ -2223,6 +2544,71 @@ impl PluginRegistry {
             .lock()
             .map(|g| g.clone())
             .unwrap_or_else(|_| "Pronto".to_string())
+    }
+
+    /// Returns the parsed network endpoint for the Smartphone Camera plugin (`phone_camera_source`).
+    pub fn parsed_phone_endpoint(&self) -> ParsedPhoneEndpoint {
+        ParsedPhoneEndpoint::parse(&self.phone_camera_endpoint())
+    }
+
+    /// Returns the current connection state (`Disconnected`, `PairingStandby`, `StreamingActive`)
+    /// for the Smartphone Camera plugin (`phone_camera_source`), ported from `PhoneCameraPlugin::GetConnectionState`.
+    pub fn phone_connection_state(&self) -> PhoneConnectionState {
+        if !self.is_plugin_enabled(PLUGIN_ID_PHONE_CAMERA) {
+            return PhoneConnectionState::Disconnected;
+        }
+        if let Ok(guard) = self.phone_shared_frame.lock() {
+            if let Some(ts) = guard.last_received {
+                if ts.elapsed() < Duration::from_secs(10)
+                    && guard.width > 0
+                    && guard.height > 0
+                    && !guard.bgra.is_empty()
+                {
+                    return PhoneConnectionState::StreamingActive;
+                }
+            }
+        }
+        PhoneConnectionState::PairingStandby
+    }
+
+    /// Pushes a decoded `BGRA32` smartphone frame into the plugin's shared frame buffer
+    /// and switches connection state to `StreamingActive`, ported from `PhoneCameraPlugin::PushDecodedPhoneFrame`.
+    pub fn push_decoded_phone_frame(
+        &mut self,
+        bgra_data: &[u8],
+        width: u32,
+        height: u32,
+        stride: u32,
+    ) -> bool {
+        let row_bytes = (width as usize) * 4;
+        if width == 0
+            || height == 0
+            || (stride as usize) < row_bytes
+            || bgra_data.len() < (stride as usize) * (height as usize - 1) + row_bytes
+        {
+            return false;
+        }
+        if let Ok(mut guard) = self.phone_shared_frame.lock() {
+            let needed = row_bytes * (height as usize);
+            if guard.bgra.len() != needed {
+                guard.bgra.resize(needed, 255);
+            }
+            for y in 0..(height as usize) {
+                let src_off = y * (stride as usize);
+                let dst_off = y * row_bytes;
+                guard.bgra[dst_off..dst_off + row_bytes]
+                    .copy_from_slice(&bgra_data[src_off..src_off + row_bytes]);
+            }
+            guard.width = width;
+            guard.height = height;
+            guard.last_received = Some(Instant::now());
+            guard.source_tag = "Direct Push BGRA32".to_string();
+        } else {
+            return false;
+        }
+        self.phone_received_frames.fetch_add(1, Ordering::Relaxed);
+        self.refresh_status_labels();
+        true
     }
 
     /// Requests Windows Firewall UAC elevation (`ShellExecuteW` `"runas"` on `powershell.exe`) to:
@@ -2755,7 +3141,10 @@ impl PluginRegistry {
         // Sync phone_camera_source endpoint port if pointing to local LAN IP
         let current_lan_url = format!("http://{}:{}", lan_ip, self.phone_port);
         for p in &mut self.plugins {
-            if p.id == PLUGIN_ID_PHONE_CAMERA && p.config_endpoint.starts_with(&format!("http://{}:", lan_ip)) {
+            if p.id == PLUGIN_ID_PHONE_CAMERA
+                && p.config_endpoint
+                    .starts_with(&format!("http://{}:", lan_ip))
+            {
                 p.config_endpoint = current_lan_url.clone();
             }
         }
@@ -3011,14 +3400,7 @@ impl PluginRegistry {
 // Image Scaling & Crisp 5x7 Bitmap Font Renderer for Video Overlays
 // ============================================================================
 
-fn scale_bgra_nearest(
-    src: &[u8],
-    src_w: u32,
-    src_h: u32,
-    dst: &mut [u8],
-    dst_w: u32,
-    dst_h: u32,
-) {
+fn scale_bgra_nearest(src: &[u8], src_w: u32, src_h: u32, dst: &mut [u8], dst_w: u32, dst_h: u32) {
     if src_w == 0 || src_h == 0 || dst_w == 0 || dst_h == 0 {
         return;
     }
@@ -3047,47 +3429,129 @@ fn scale_bgra_nearest(
 /// Returns a 5x7 bitmap glyph (7 rows of 5-bit masks) for uppercase ASCII characters, digits, and URL punctuation.
 fn glyph_5x7(ch: char) -> [u8; 7] {
     match ch.to_ascii_uppercase() {
-        'A' => [0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
-        'B' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110],
-        'C' => [0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110],
-        'D' => [0b11100, 0b10010, 0b10001, 0b10001, 0b10001, 0b10010, 0b11100],
-        'E' => [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111],
-        'F' => [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000],
-        'G' => [0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01110],
-        'H' => [0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
-        'I' => [0b01110, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
-        'J' => [0b00111, 0b00010, 0b00010, 0b00010, 0b10010, 0b10010, 0b01100],
-        'K' => [0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001],
-        'L' => [0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111],
-        'M' => [0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001],
-        'N' => [0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001],
-        'O' => [0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
-        'P' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000],
-        'Q' => [0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101],
-        'R' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001],
-        'S' => [0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b11110],
-        'T' => [0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100],
-        'U' => [0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
-        'V' => [0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100],
-        'W' => [0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b11011, 0b10001],
-        'X' => [0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001],
-        'Y' => [0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100],
-        'Z' => [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111],
-        '0' => [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],
-        '1' => [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
-        '2' => [0b01110, 0b10001, 0b00001, 0b00110, 0b01000, 0b10000, 0b11111],
-        '3' => [0b11110, 0b00001, 0b00001, 0b01110, 0b00001, 0b00001, 0b11110],
-        '4' => [0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010],
-        '5' => [0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110],
-        '6' => [0b01110, 0b10000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110],
-        '7' => [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000],
-        '8' => [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110],
-        '9' => [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00001, 0b01110],
-        ':' => [0b00000, 0b00100, 0b00100, 0b00000, 0b00100, 0b00100, 0b00000],
-        '.' => [0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b01100, 0b01100],
-        '/' => [0b00001, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b10000],
-        '-' => [0b00000, 0b00000, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000],
-        '_' => [0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b11111],
+        'A' => [
+            0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+        ],
+        'B' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110,
+        ],
+        'C' => [
+            0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110,
+        ],
+        'D' => [
+            0b11100, 0b10010, 0b10001, 0b10001, 0b10001, 0b10010, 0b11100,
+        ],
+        'E' => [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111,
+        ],
+        'F' => [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000,
+        ],
+        'G' => [
+            0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01110,
+        ],
+        'H' => [
+            0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+        ],
+        'I' => [
+            0b01110, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+        ],
+        'J' => [
+            0b00111, 0b00010, 0b00010, 0b00010, 0b10010, 0b10010, 0b01100,
+        ],
+        'K' => [
+            0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001,
+        ],
+        'L' => [
+            0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111,
+        ],
+        'M' => [
+            0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001,
+        ],
+        'N' => [
+            0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001,
+        ],
+        'O' => [
+            0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+        ],
+        'P' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000,
+        ],
+        'Q' => [
+            0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101,
+        ],
+        'R' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001,
+        ],
+        'S' => [
+            0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b11110,
+        ],
+        'T' => [
+            0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100,
+        ],
+        'U' => [
+            0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+        ],
+        'V' => [
+            0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100,
+        ],
+        'W' => [
+            0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b11011, 0b10001,
+        ],
+        'X' => [
+            0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001,
+        ],
+        'Y' => [
+            0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100,
+        ],
+        'Z' => [
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111,
+        ],
+        '0' => [
+            0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
+        ],
+        '1' => [
+            0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+        ],
+        '2' => [
+            0b01110, 0b10001, 0b00001, 0b00110, 0b01000, 0b10000, 0b11111,
+        ],
+        '3' => [
+            0b11110, 0b00001, 0b00001, 0b01110, 0b00001, 0b00001, 0b11110,
+        ],
+        '4' => [
+            0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
+        ],
+        '5' => [
+            0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
+        ],
+        '6' => [
+            0b01110, 0b10000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
+        ],
+        '7' => [
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
+        ],
+        '8' => [
+            0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
+        ],
+        '9' => [
+            0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00001, 0b01110,
+        ],
+        ':' => [
+            0b00000, 0b00100, 0b00100, 0b00000, 0b00100, 0b00100, 0b00000,
+        ],
+        '.' => [
+            0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b01100, 0b01100,
+        ],
+        '/' => [
+            0b00001, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b10000,
+        ],
+        '-' => [
+            0b00000, 0b00000, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000,
+        ],
+        '_' => [
+            0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b11111,
+        ],
         _ => [0b00000; 7],
     }
 }
@@ -3188,8 +3652,12 @@ fn render_smartphone_pairing_frame_bgra(
     let card_x = (width.saturating_sub(card_w)) / 2;
     let card_y = (height.saturating_sub(card_h)) / 2;
 
-    fill_rect_bgra(out_bgra, width, height, card_x, card_y, card_w, card_h, 42, 28, 16);
-    border_rect_bgra(out_bgra, width, height, card_x, card_y, card_w, card_h, 3, 240, 195, 45);
+    fill_rect_bgra(
+        out_bgra, width, height, card_x, card_y, card_w, card_h, 42, 28, 16,
+    );
+    border_rect_bgra(
+        out_bgra, width, height, card_x, card_y, card_w, card_h, 3, 240, 195, 45,
+    );
 
     let center_x = card_x + card_w / 2;
     let base_scale = if width >= 960 {
@@ -3208,16 +3676,7 @@ fn render_smartphone_pairing_frame_bgra(
     let y4 = bar_y + 28;
 
     draw_centered_text_bgra(
-        out_bgra,
-        width,
-        height,
-        center_x,
-        y1,
-        title_line,
-        base_scale,
-        90,
-        220,
-        255,
+        out_bgra, width, height, center_x, y1, title_line, base_scale, 90, 220, 255,
     );
     draw_centered_text_bgra(
         out_bgra,
@@ -3262,16 +3721,7 @@ fn render_smartphone_pairing_frame_bgra(
         90,
     );
     draw_centered_text_bgra(
-        out_bgra,
-        width,
-        height,
-        center_x,
-        y3,
-        url_line,
-        url_scale,
-        120,
-        255,
-        110,
+        out_bgra, width, height, center_x, y3, url_line, url_scale, 120, 255, 110,
     );
 
     // Animated radar scan bar
@@ -3326,7 +3776,9 @@ fn render_smartphone_pairing_frame_bgra(
         if card_w >= qr_box_px + 220 && card_h >= qr_box_px + 20 {
             let qx = (card_x + card_w).saturating_sub(qr_box_px + 14);
             let qy = (card_y + card_h).saturating_sub(qr_box_px + 12);
-            fill_rect_bgra(out_bgra, width, height, qx, qy, qr_box_px, qr_box_px, 255, 255, 255);
+            fill_rect_bgra(
+                out_bgra, width, height, qx, qy, qr_box_px, qr_box_px, 255, 255, 255,
+            );
             for r in 0..qr_n {
                 for c in 0..qr_n {
                     if qr_mods[r * qr_n + c] {
@@ -3411,7 +3863,7 @@ pub fn generate_qr_code_matrix(text: &str) -> (usize, Vec<bool>) {
     let mut modules = vec![false; size * size];
     let mut is_func = vec![false; size * size];
 
-    let mut set_func = |r: usize, c: usize, dark: bool, mods: &mut [bool], func: &mut [bool]| {
+    let set_func = |r: usize, c: usize, dark: bool, mods: &mut [bool], func: &mut [bool]| {
         if r < size && c < size {
             mods[r * size + c] = dark;
             func[r * size + c] = true;
@@ -3419,7 +3871,11 @@ pub fn generate_qr_code_matrix(text: &str) -> (usize, Vec<bool>) {
     };
 
     // Finder patterns (7x7) + separators at (0,0), (0, size-7), (size-7, 0)
-    let finder_origins = [(0isize, 0isize), (0isize, (size - 7) as isize), ((size - 7) as isize, 0isize)];
+    let finder_origins = [
+        (0isize, 0isize),
+        (0isize, (size - 7) as isize),
+        ((size - 7) as isize, 0isize),
+    ];
     for &(fr, fc) in &finder_origins {
         for dr in -1isize..=7 {
             for dc in -1isize..=7 {
@@ -3628,12 +4084,7 @@ fn border_rect_bgra(
 
 /// Detects secondary faces and upper-body silhouettes across all horizontal zones of the frame
 /// (up to 4 simultaneous people) and reinforces their foreground segmentation mask (`inout_mask`).
-fn apply_multi_person_mask_refinement(
-    bgra: &[u8],
-    inout_mask: &mut [u8],
-    width: u32,
-    height: u32,
-) {
+fn apply_multi_person_mask_refinement(bgra: &[u8], inout_mask: &mut [u8], width: u32, height: u32) {
     if width < 32 || height < 32 {
         return;
     }
@@ -3715,7 +4166,8 @@ fn apply_multi_person_mask_refinement(
                         };
                         let idx = row_px + x;
                         if boost > inout_mask[idx] {
-                            inout_mask[idx] = ((inout_mask[idx] as u16 + boost as u16 * 2) / 3) as u8;
+                            inout_mask[idx] =
+                                ((inout_mask[idx] as u16 + boost as u16 * 2) / 3) as u8;
                         }
                     }
                 }
@@ -3775,10 +4227,10 @@ fn apply_studio_color_enhancer_bgra(inout_bgra: &mut [u8], width: u32, height: u
         let contrast_gain = if is_skin { 104 } else { 109 };
 
         let r_out = (((r + exposure_lift - 128) * contrast_gain) / 100 + 133).clamp(0, 255) as u8;
-        let g_out = (((g + exposure_lift - 128) * (contrast_gain - 2)) / 100 + 129)
-            .clamp(0, 255) as u8;
-        let b_out = (((b + exposure_lift - 128) * (contrast_gain - 5)) / 100 + 124)
-            .clamp(0, 255) as u8;
+        let g_out =
+            (((g + exposure_lift - 128) * (contrast_gain - 2)) / 100 + 129).clamp(0, 255) as u8;
+        let b_out =
+            (((b + exposure_lift - 128) * (contrast_gain - 5)) / 100 + 124).clamp(0, 255) as u8;
 
         inout_bgra[idx] = b_out;
         inout_bgra[idx + 1] = g_out;
@@ -3849,15 +4301,257 @@ fn apply_teleprompter_overlay_bgra(
     let marker_x = (width.saturating_sub(marker_w)) / 2;
     let marker_y = bar_h.saturating_sub(4);
     fill_rect_bgra(
-        inout_bgra,
-        width,
-        height,
-        marker_x,
-        marker_y,
-        marker_w,
-        3,
-        60,
-        215,
-        255,
+        inout_bgra, width, height, marker_x, marker_y, marker_w, 3, 60, 215, 255,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rustls::pki_types::ServerName;
+    use rustls::{ClientConfig, ClientConnection, RootCertStore};
+
+    #[repr(C)]
+    struct ProcessEntry32W {
+        dw_size: u32,
+        cnt_usage: u32,
+        th32_process_id: u32,
+        th32_default_heap_id: usize,
+        th32_module_id: u32,
+        cnt_threads: u32,
+        th32_parent_process_id: u32,
+        pc_pri_class_base: i32,
+        dw_flags: u32,
+        sz_exe_file: [u16; 260],
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetCurrentProcessId() -> u32;
+        fn CreateToolhelp32Snapshot(dw_flags: u32, th32_process_id: u32) -> *mut c_void;
+        fn Process32FirstW(h_snapshot: *mut c_void, lppe: *mut ProcessEntry32W) -> i32;
+        fn Process32NextW(h_snapshot: *mut c_void, lppe: *mut ProcessEntry32W) -> i32;
+        fn CloseHandle(h_object: *mut c_void) -> i32;
+    }
+
+    fn count_child_powershell_processes() -> usize {
+        const TH32CS_SNAPPROCESS: u32 = 0x0000_0002;
+        unsafe {
+            let my_pid = GetCurrentProcessId();
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if snap.is_null() || (snap as isize) == -1 {
+                return 0;
+            }
+            let mut entry: ProcessEntry32W = std::mem::zeroed();
+            entry.dw_size = std::mem::size_of::<ProcessEntry32W>() as u32;
+            let mut count = 0usize;
+            if Process32FirstW(snap, &mut entry) != 0 {
+                loop {
+                    if entry.th32_parent_process_id == my_pid {
+                        let len = entry
+                            .sz_exe_file
+                            .iter()
+                            .position(|&c| c == 0)
+                            .unwrap_or(entry.sz_exe_file.len());
+                        let name = String::from_utf16_lossy(&entry.sz_exe_file[..len])
+                            .to_ascii_lowercase();
+                        if name.contains("powershell") || name.contains("pwsh") {
+                            count += 1;
+                        }
+                    }
+                    if Process32NextW(snap, &mut entry) == 0 {
+                        break;
+                    }
+                }
+            }
+            let _ = CloseHandle(snap);
+            count
+        }
+    }
+
+    #[test]
+    fn test_native_rust_tls_server_handshake_and_zero_powershell() {
+        let tls_mat = get_or_init_phone_tls_material()
+            .expect("rcgen + rustls must generate self-signed X.509 certificate in-process");
+        assert!(!tls_mat.cert_der.is_empty());
+
+        // Pick a free test port for the PhoneCameraServer
+        let mut test_port = 18440u16;
+        for candidate in 18440..18540 {
+            if TcpListener::bind(("127.0.0.1", candidate)).is_ok()
+                && TcpListener::bind(("127.0.0.1", candidate + 1000)).is_ok()
+            {
+                test_port = candidate;
+                break;
+            }
+        }
+
+        let shared_frame = Arc::new(Mutex::new(PhoneFrameSharedState::default()));
+        let received_frames = Arc::new(AtomicU64::new(0));
+        let tcp_connections = Arc::new(AtomicU64::new(0));
+        let last_client_log = Arc::new(Mutex::new(String::new()));
+        let remote_pull_url = Arc::new(Mutex::new(String::new()));
+
+        let mut server = PhoneCameraServer::new(
+            test_port,
+            Arc::clone(&shared_frame),
+            Arc::clone(&received_frames),
+            Arc::clone(&tcp_connections),
+            Arc::clone(&last_client_log),
+            Arc::clone(&remote_pull_url),
+        );
+        assert!(server.is_running.load(Ordering::SeqCst));
+
+        // Verify zero powershell.exe child processes were spawned by the server
+        assert_eq!(
+            count_child_powershell_processes(),
+            0,
+            "PhoneCameraServer must not spawn any powershell.exe subprocesses"
+        );
+
+        // Configure a rustls ClientConfig trusting ONLY the rcgen self-signed certificate
+        let mut root_store = RootCertStore::empty();
+        root_store
+            .add(CertificateDer::from(tls_mat.cert_der.clone()))
+            .expect("Generated rcgen certificate must be valid DER");
+
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let client_config = Arc::new(
+            ClientConfig::builder_with_provider(provider)
+                .with_safe_default_protocol_versions()
+                .expect("TLS protocol versions")
+                .with_root_certificates(root_store)
+                .with_no_client_auth(),
+        );
+
+        // 1. Test HTTPS GET /status on the single-port HTTP/HTTPS multiplexed listener (`127.0.0.1:<test_port>`)
+        {
+            let server_name = ServerName::try_from("localhost").expect("valid DNS ServerName");
+            let client_conn =
+                ClientConnection::new(Arc::clone(&client_config), server_name).unwrap();
+            let tcp =
+                TcpStream::connect(("127.0.0.1", test_port)).expect("connect to multiplexed port");
+            tcp.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            tcp.set_write_timeout(Some(Duration::from_secs(3))).unwrap();
+
+            let mut tls_stream = StreamOwned::new(client_conn, tcp);
+            let req = format!(
+                "GET /status HTTP/1.1\r\nHost: localhost:{}\r\nConnection: close\r\n\r\n",
+                test_port
+            );
+            tls_stream
+                .write_all(req.as_bytes())
+                .expect("HTTPS write GET /status");
+            tls_stream.flush().unwrap();
+
+            let mut resp_bytes = Vec::new();
+            let _ = tls_stream.read_to_end(&mut resp_bytes);
+            let resp_str = String::from_utf8_lossy(&resp_bytes);
+            assert!(
+                resp_str.starts_with("HTTP/1.1 200 OK"),
+                "Expected 200 OK over HTTPS, got: {}",
+                resp_str
+            );
+            assert!(
+                resp_str.contains("\"ok\":true"),
+                "Expected JSON body with \"ok\":true, got: {}",
+                resp_str
+            );
+        }
+
+        // 2. Test HTTPS POST /frame on the loopback TLS port (`127.0.0.1:<test_port + 1000>`) using IP SAN 127.0.0.1
+        {
+            let ip_server_name =
+                ServerName::IpAddress(rustls::pki_types::IpAddr::try_from("127.0.0.1").unwrap());
+            let client_conn =
+                ClientConnection::new(Arc::clone(&client_config), ip_server_name).unwrap();
+            let tcp = TcpStream::connect(("127.0.0.1", test_port + 1000))
+                .expect("connect to TLS loopback port");
+            tcp.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            tcp.set_write_timeout(Some(Duration::from_secs(3))).unwrap();
+
+            let mut tls_stream = StreamOwned::new(client_conn, tcp);
+            let raw_rgba = vec![128u8; 16 * 16 * 4];
+            let hdr = format!(
+                "POST /frame?w=16&h=16&fmt=rgba HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                test_port,
+                raw_rgba.len()
+            );
+            tls_stream.write_all(hdr.as_bytes()).unwrap();
+            tls_stream.write_all(&raw_rgba).unwrap();
+            tls_stream.flush().unwrap();
+
+            let mut resp_bytes = Vec::new();
+            let _ = tls_stream.read_to_end(&mut resp_bytes);
+            let resp_str = String::from_utf8_lossy(&resp_bytes);
+            assert!(resp_str.starts_with("HTTP/1.1 200 OK"));
+            assert!(resp_str.contains("\"ok\":true"));
+            assert_eq!(received_frames.load(Ordering::SeqCst), 1);
+        }
+
+        assert_eq!(count_child_powershell_processes(), 0);
+        server.stop();
+    }
+
+    #[test]
+    fn test_parsed_phone_endpoint_and_mjpeg_boundary_extraction() {
+        let ep_http = ParsedPhoneEndpoint::parse("http://192.168.1.55:8080/video");
+        assert_eq!(ep_http.scheme, "http");
+        assert_eq!(ep_http.host, "192.168.1.55");
+        assert_eq!(ep_http.port, 8080);
+        assert_eq!(ep_http.path, "/video");
+        assert!(!ep_http.is_usb);
+
+        let ep_rtsp = ParsedPhoneEndpoint::parse("rtsp://192.168.1.120/live");
+        assert_eq!(ep_rtsp.scheme, "rtsp");
+        assert_eq!(ep_rtsp.host, "192.168.1.120");
+        assert_eq!(ep_rtsp.port, 8554);
+        assert_eq!(ep_rtsp.path, "/live");
+        assert!(!ep_rtsp.is_usb);
+
+        let ep_usb = ParsedPhoneEndpoint::parse("http://127.0.0.1:8080/shot.jpg");
+        assert!(ep_usb.is_usb);
+
+        // Test multipart MJPEG stream extraction with explicit Content-Length
+        let fake_jpeg = vec![
+            0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, b'J', b'F', b'I', b'F', 0xFF, 0xD9,
+        ];
+        let mut mjpeg_stream = Vec::new();
+        mjpeg_stream.extend_from_slice(
+            format!(
+                "HTTP/1.0 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=myboundary\r\n\r\n\
+                 --myboundary\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\n\r\n",
+                fake_jpeg.len()
+            )
+            .as_bytes(),
+        );
+        mjpeg_stream.extend_from_slice(&fake_jpeg);
+        mjpeg_stream.extend_from_slice(b"\r\n--myboundary\r\n");
+
+        let (extracted, consumed) =
+            extract_mjpeg_frame_from_buffer(&mjpeg_stream).expect("must extract MJPEG frame");
+        assert_eq!(extracted, fake_jpeg);
+        assert!(consumed >= fake_jpeg.len());
+    }
+
+    #[test]
+    fn test_plugin_registry_push_frame_and_filters() {
+        let (qr_size, qr_mods) = generate_qr_code_matrix("https://192.168.1.55:8080");
+        assert_eq!(qr_size, 25);
+        assert_eq!(qr_mods.len(), 25 * 25);
+
+        let mut bgra = vec![40u8; 64 * 64 * 4];
+        for px in bgra.chunks_exact_mut(4) {
+            px[3] = 255;
+        }
+        let mut mask = vec![0u8; 64 * 64];
+        apply_studio_color_enhancer_bgra(&mut bgra, 64, 64);
+        assert!(
+            bgra[2] > 40,
+            "low-light exposure lift must brighten dark frame"
+        );
+        apply_multi_person_mask_refinement(&bgra, &mut mask, 64, 64);
+        apply_teleprompter_overlay_bgra(&mut bgra, 64, 64, "TEST TELEPROMPTER", 1);
+        assert_eq!(bgra[3], 255);
+    }
 }

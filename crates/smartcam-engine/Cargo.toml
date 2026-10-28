@@ -1,0 +1,20 @@
+# Personal and Educational Free License (PEF License / PEFL)
+# Version 1.0 - 2026-05-26
+# Copyright (c) 2026 Rubens Rainelli
+
+[package]
+name = "smartcam-engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SmartCam v2.0 Pure Rust Video Compositor, Runtime SIMD Dispatch, AI Segmentation & GPU Acceleration"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }

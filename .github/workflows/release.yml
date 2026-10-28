@@ -1,0 +1,281 @@
+name: SmartCam v2.0.0 Multi-Platform Build, Sign & Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  SMARTCAM_VERSION: "2.0.0"
+
+jobs:
+  build-windows:
+    name: Build & Sign Windows x64 (Media Foundation + Inno Setup)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (x86_64-pc-windows-msvc)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Pure Rust Workspace (Release)
+        run: cargo build --release --workspace --target x86_64-pc-windows-msvc
+
+      - name: Run Workspace Unit Tests
+        run: cargo test --release --workspace --target x86_64-pc-windows-msvc
+
+      - name: Stage Release Binaries
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "target/release" | Out-Null
+          Copy-Item -Force "target/x86_64-pc-windows-msvc/release/SmartCam.exe" "target/release/SmartCam.exe"
+          Copy-Item -Force "target/x86_64-pc-windows-msvc/release/smartcam_mf_source.dll" "target/release/smartcam_mf_source.dll"
+
+      - name: Decode Code Signing Certificate & Sign Binaries + Installer
+        shell: pwsh
+        env:
+          WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pfxPath = Join-Path $env:RUNNER_TEMP "cert.pfx"
+          try {
+            $pfxBytes = [Convert]::FromBase64String($env:WINDOWS_PFX_BASE64.Trim())
+            [System.IO.File]::WriteAllBytes($pfxPath, $pfxBytes)
+
+            $signtool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" |
+              Where-Object { $_.FullName -match "\\x64\\signtool\.exe$" } |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1 -ExpandProperty FullName
+            if (-not $signtool) {
+              throw "signtool.exe not found on runner"
+            }
+            Write-Host "Using SignTool: $signtool"
+
+            & $signtool sign /f $pfxPath /p $env:WINDOWS_PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "target/release/SmartCam.exe"
+            if ($LASTEXITCODE -ne 0) { throw "Failed to sign SmartCam.exe" }
+
+            & $signtool sign /f $pfxPath /p $env:WINDOWS_PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "target/release/smartcam_mf_source.dll"
+            if ($LASTEXITCODE -ne 0) { throw "Failed to sign smartcam_mf_source.dll" }
+
+            # Compile Inno Setup Installer
+            $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+            if (-not $iscc -and (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+              $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+            }
+            if (-not $iscc) {
+              choco install innosetup --no-progress -y
+              $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+            }
+            & $iscc "platforms/windows/installer/smartcam.iss"
+            if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
+
+            & $signtool sign /f $pfxPath /p $env:WINDOWS_PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "dist/SmartCam-Setup-v2.0.0-x64.exe"
+            if ($LASTEXITCODE -ne 0) { throw "Failed to sign SmartCam-Setup-v2.0.0-x64.exe" }
+          } finally {
+            if (Test-Path $pfxPath) {
+              Remove-Item -Force $pfxPath -ErrorAction SilentlyContinue
+            }
+          }
+
+      - name: Package Portable Windows Archive
+        shell: pwsh
+        run: |
+          $stage = "dist/portable/SmartCam-v2.0.0-windows-x64"
+          New-Item -ItemType Directory -Force -Path "$stage/config" | Out-Null
+          Copy-Item -Force "target/release/SmartCam.exe" "$stage/SmartCam.exe"
+          Copy-Item -Force "target/release/smartcam_mf_source.dll" "$stage/smartcam_mf_source.dll"
+          Copy-Item -Recurse -Force "assets" "$stage/assets"
+          Copy-Item -Force "config/default_config.yaml" "$stage/config/default_config.yaml"
+          Copy-Item -Force "LICENSE", "LICENSE.it", "NOTICE.md", "README.md", "README.it.md" "$stage/"
+          Compress-Archive -Path "$stage/*" -DestinationPath "dist/SmartCam-v2.0.0-windows-x64-portable.zip" -Force
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-windows
+          path: |
+            dist/SmartCam-Setup-v2.0.0-x64.exe
+            dist/SmartCam-v2.0.0-windows-x64-portable.zip
+
+  build-linux:
+    name: Build & Package Linux x86_64 (.tar.gz & .deb)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (x86_64-unknown-linux-gnu)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Rust cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Pure Rust Workspace (Release)
+        run: cargo build --release --workspace --target x86_64-unknown-linux-gnu
+
+      - name: Run Workspace Unit Tests
+        run: cargo test --release --workspace --target x86_64-unknown-linux-gnu
+
+      - name: Package Linux .tar.gz and .deb
+        run: |
+          mkdir -p dist
+          STAGE_TAR="dist/smartcam-linux"
+          mkdir -p "$STAGE_TAR/config"
+          cp target/x86_64-unknown-linux-gnu/release/SmartCam "$STAGE_TAR/SmartCam"
+          chmod +x "$STAGE_TAR/SmartCam"
+          cp -r assets "$STAGE_TAR/assets"
+          cp config/default_config.yaml "$STAGE_TAR/config/default_config.yaml"
+          cp LICENSE LICENSE.it NOTICE.md README.md README.it.md "$STAGE_TAR/"
+          tar -C "$STAGE_TAR" -czf "dist/SmartCam-v2.0.0-linux-x86_64.tar.gz" .
+
+          DEB_ROOT="dist/deb/smartcam_2.0.0_amd64"
+          mkdir -p "$DEB_ROOT/DEBIAN"
+          mkdir -p "$DEB_ROOT/usr/bin"
+          mkdir -p "$DEB_ROOT/usr/share/smartcam/config"
+          mkdir -p "$DEB_ROOT/usr/share/applications"
+          cp target/x86_64-unknown-linux-gnu/release/SmartCam "$DEB_ROOT/usr/bin/smartcam"
+          chmod 0755 "$DEB_ROOT/usr/bin/smartcam"
+          cp -r assets "$DEB_ROOT/usr/share/smartcam/assets"
+          cp config/default_config.yaml "$DEB_ROOT/usr/share/smartcam/config/default_config.yaml"
+          cp LICENSE LICENSE.it NOTICE.md README.md README.it.md "$DEB_ROOT/usr/share/smartcam/"
+          cat > "$DEB_ROOT/DEBIAN/control" << 'EOF'
+          Package: smartcam
+          Version: 2.0.0
+          Section: video
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Rubens Rainelli <rubens@rainelli.it>
+          Description: SmartCam v2.0.0 — Pure Rust AI Virtual Camera & Studio Compositor
+           High-performance 100% pure Rust Virtual Camera, background replacement,
+           blur, green screen, and wireless smartphone camera receiver.
+          EOF
+          dpkg-deb --build "$DEB_ROOT" "dist/smartcam_2.0.0_amd64.deb"
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-linux
+          path: |
+            dist/SmartCam-v2.0.0-linux-x86_64.tar.gz
+            dist/smartcam_2.0.0_amd64.deb
+
+  build-macos:
+    name: Build & Sign macOS Universal (.dmg)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (Universal Apple Silicon + Intel)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Rust cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Pure Rust Binaries (x86_64 + aarch64)
+        run: |
+          cargo build --release --workspace --target x86_64-apple-darwin
+          cargo build --release --workspace --target aarch64-apple-darwin
+
+      - name: Create Signed Universal App Bundle & .dmg
+        run: |
+          mkdir -p dist/dmg/SmartCam.app/Contents/MacOS
+          mkdir -p dist/dmg/SmartCam.app/Contents/Resources/config
+          lipo -create \
+            target/x86_64-apple-darwin/release/SmartCam \
+            target/aarch64-apple-darwin/release/SmartCam \
+            -output dist/dmg/SmartCam.app/Contents/MacOS/SmartCam
+          chmod +x dist/dmg/SmartCam.app/Contents/MacOS/SmartCam
+          cp -r assets dist/dmg/SmartCam.app/Contents/Resources/assets
+          cp config/default_config.yaml dist/dmg/SmartCam.app/Contents/Resources/config/default_config.yaml
+          cp LICENSE LICENSE.it NOTICE.md README.md README.it.md dist/dmg/SmartCam.app/Contents/Resources/
+          cat > dist/dmg/SmartCam.app/Contents/Info.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>
+            <string>SmartCam</string>
+            <key>CFBundleIdentifier</key>
+            <string>it.rainelli.smartcam</string>
+            <key>CFBundleName</key>
+            <string>SmartCam</string>
+            <key>CFBundleDisplayName</key>
+            <string>SmartCam</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>2.0.0</string>
+            <key>CFBundleVersion</key>
+            <string>2.0.0</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>11.0</string>
+            <key>NSCameraUsageDescription</key>
+            <string>SmartCam requires camera access to apply real-time AI background effects.</string>
+          </dict>
+          </plist>
+          EOF
+          codesign --force --deep --sign - dist/dmg/SmartCam.app
+          hdiutil create -volname "SmartCam v2.0.0" -srcfolder dist/dmg -ov -format UDZO "dist/SmartCam-v2.0.0-macos-universal.dmg"
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-macos
+          path: dist/SmartCam-v2.0.0-macos-universal.dmg
+
+  release:
+    name: Publish GitHub Release & SHA256SUMS
+    needs: [build-windows, build-linux, build-macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download All Platform Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS.txt
+        working-directory: release-assets
+        run: |
+          sha256sum SmartCam-Setup-v2.0.0-x64.exe \
+                    SmartCam-v2.0.0-windows-x64-portable.zip \
+                    SmartCam-v2.0.0-macos-universal.dmg \
+                    SmartCam-v2.0.0-linux-x86_64.tar.gz \
+                    smartcam_2.0.0_amd64.deb > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create or Update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            gh release create "$TAG" release-assets/* \
+              --title "SmartCam $TAG — 100% Pure Rust, Signed Installer & Media Foundation" \
+              --notes-file CHANGELOG.md
+          fi
