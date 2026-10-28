@@ -53,9 +53,12 @@ struct SharedFrameHeader {
     uint64_t          frame_index;                ///< Monotonic frame number
     volatile LONG64   last_consumer_heartbeat_ms; ///< GetTickCount64() ms timestamp of last client RequestSample/StartStream
     volatile LONG64   consumer_requests;          ///< Monotonic counter of client frame requests
-    uint8_t           reserved[48];               ///< Padding to 128-byte boundary before pixel payload
+    uint8_t           reserved[48];               ///< Reserved; the pixel payload starts right after the header (offset 120)
 };
 #pragma pack(pop)
+
+// Shared-memory ABI with already installed drivers and with FallbackSharedMemoryWriter (app/src/engine_bridge.rs).
+static_assert(sizeof(SharedFrameHeader) == 120, "SharedFrameHeader layout changed: the pixel payload offset is part of the IPC ABI");
 
 /**
  * @brief Named Windows File Mapping wrapper used by both the User-Mode Producer (`MfVirtualCameraSink`)

@@ -2191,7 +2191,9 @@ unsafe impl Send for FallbackSharedMemoryWriter {}
 
 impl FallbackSharedMemoryWriter {
     const MAX_FRAME_BYTES: usize = 3840 * 2160 * 4;
-    const TOTAL_BYTES: usize = 128 + Self::MAX_FRAME_BYTES;
+    /// Pixels start right after the header, like `SharedFrameIpc::Payload()` (`sizeof(SharedFrameHeader)` = 120).
+    const PAYLOAD_OFFSET: usize = std::mem::size_of::<SharedFrameHeaderRaw>();
+    const TOTAL_BYTES: usize = Self::PAYLOAD_OFFSET + Self::MAX_FRAME_BYTES;
 
     pub fn open(mapping_name: &str) -> Option<Self> {
         unsafe {
@@ -2219,7 +2221,7 @@ impl FallbackSharedMemoryWriter {
 
             let hdr = &mut *(view as *mut SharedFrameHeaderRaw);
             if hdr.magic != 0x534D434D {
-                std::ptr::write_bytes(view, 0, 128);
+                std::ptr::write_bytes(view, 0, Self::PAYLOAD_OFFSET);
                 hdr.magic = 0x534D434D;
                 hdr.version = 1;
                 hdr.pixel_format = 4;
@@ -2254,7 +2256,7 @@ impl FallbackSharedMemoryWriter {
             self.frame_index += 1;
             hdr.frame_index = self.frame_index;
 
-            let payload = self.mapped_view.add(128);
+            let payload = self.mapped_view.add(Self::PAYLOAD_OFFSET);
             std::ptr::copy_nonoverlapping(bgra.as_ptr(), payload, bytes);
 
             hdr.sequence_counter.fetch_add(1, Ordering::SeqCst);
@@ -2278,5 +2280,60 @@ impl Drop for FallbackSharedMemoryWriter {
                 CloseHandle(self.event_handle);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `sizeof(SharedFrameHeader)` in `platforms/windows/ipc/shared_frame_ipc.h`: the Media
+    /// Foundation and DirectShow sources read pixels from `mapped_view + sizeof(SharedFrameHeader)`.
+    const CPP_SHARED_FRAME_HEADER_BYTES: usize = 120;
+
+    fn read_u32(view: *const u8, offset: usize) -> u32 {
+        unsafe { std::ptr::read_unaligned(view.add(offset) as *const u32) }
+    }
+
+    #[test]
+    fn fallback_writer_puts_pixels_where_the_driver_reads_them() {
+        let name = format!(r"Local\SmartCam_FallbackIpcTest_{}", std::process::id());
+        let mut writer = FallbackSharedMemoryWriter::open(&name).expect("open fallback mapping");
+        let (width, height) = (4u32, 2u32);
+        let pixels: Vec<u8> = (1..=(width * height * 4) as u8).collect();
+        writer.write_frame(&pixels, width, height, 30);
+
+        unsafe {
+            let wname = to_wstring(&name);
+            let hmap = OpenFileMappingW(FILE_MAP_READ, 0, wname.as_ptr());
+            assert!(!hmap.is_null(), "consumer could not open the mapping");
+            let view = MapViewOfFile(hmap, FILE_MAP_READ, 0, 0, CPP_SHARED_FRAME_HEADER_BYTES + pixels.len()) as *const u8;
+            assert!(!view.is_null(), "consumer could not map the view");
+
+            // SharedFrameHeader fields the consumer checks before copying the payload.
+            assert_eq!(read_u32(view, 0), 0x534D_434D, "magic");
+            assert_eq!(read_u32(view, 4), 1, "version");
+            let seq = std::ptr::read_unaligned(view.add(8) as *const i64);
+            assert!(seq > 0 && seq % 2 == 0, "sequence_counter {seq} must be even after a complete write");
+            assert_eq!(read_u32(view, 16), width, "width");
+            assert_eq!(read_u32(view, 20), height, "height");
+            assert_eq!(read_u32(view, 24), width * 4, "stride");
+
+            let payload = std::slice::from_raw_parts(view.add(CPP_SHARED_FRAME_HEADER_BYTES), pixels.len());
+            assert_eq!(payload, &pixels[..], "pixels are not at sizeof(SharedFrameHeader)");
+
+            UnmapViewOfFile(view as *const c_void);
+            CloseHandle(hmap);
+        }
+    }
+
+    #[test]
+    fn fallback_header_layout_matches_cpp_shared_frame_header() {
+        assert_eq!(std::mem::size_of::<SharedFrameHeaderRaw>(), CPP_SHARED_FRAME_HEADER_BYTES);
+        assert_eq!(std::mem::offset_of!(SharedFrameHeaderRaw, sequence_counter), 8);
+        assert_eq!(std::mem::offset_of!(SharedFrameHeaderRaw, width), 16);
+        assert_eq!(std::mem::offset_of!(SharedFrameHeaderRaw, pixel_format), 36);
+        assert_eq!(std::mem::offset_of!(SharedFrameHeaderRaw, timestamp_100ns), 40);
+        assert_eq!(std::mem::offset_of!(SharedFrameHeaderRaw, frame_index), 48);
     }
 }
