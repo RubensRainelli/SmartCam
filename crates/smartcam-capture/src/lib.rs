@@ -33,14 +33,13 @@ pub mod macos_backend;
 
 pub use header::{
     SharedFrameHeader, DEFAULT_SHARED_EVENT_NAME, DEFAULT_SHARED_MAPPING_NAME,
-    MAX_SHARED_FRAME_BYTES, SHARED_FRAME_HEADER_BYTES, SHARED_FRAME_MAGIC,
-    SHARED_FRAME_VERSION, SMARTCAM_MF_CLSID_STR, TOTAL_SHARED_FRAME_BYTES,
+    MAX_SHARED_FRAME_BYTES, SHARED_FRAME_HEADER_BYTES, SHARED_FRAME_MAGIC, SHARED_FRAME_VERSION,
+    SMARTCAM_MF_CLSID_STR, TOTAL_SHARED_FRAME_BYTES,
 };
 pub use ipc::SharedFrameIpc;
 pub use ir::is_ir_camera_name;
 pub use types::{
-    CameraCaptureConfig, CameraDeviceInfo, CameraSource, VirtualCameraSink,
-    VirtualCameraSinkConfig,
+    CameraCaptureConfig, CameraDeviceInfo, CameraSource, VirtualCameraSink, VirtualCameraSinkConfig,
 };
 
 #[cfg(windows)]
@@ -113,16 +112,7 @@ mod tests {
             .map(|i| (i % 255) as u8)
             .collect();
 
-        let ok = producer.write_frame(
-            &test_pixels,
-            width,
-            height,
-            width * 4,
-            30,
-            1,
-            1234567890,
-            1,
-        );
+        let ok = producer.write_frame(&test_pixels, width, height, width * 4, 30, 1, 1234567890, 1);
         assert!(ok, "producer write_frame must succeed");
 
         let mut read_buf = vec![0u8; (width * height * 4) as usize];
@@ -135,7 +125,10 @@ mod tests {
         assert_eq!(r_w, width);
         assert_eq!(r_h, height);
         assert_eq!(r_ts, 1234567890);
-        assert_eq!(read_buf, test_pixels, "read pixel buffer must match written data exactly");
+        assert_eq!(
+            read_buf, test_pixels,
+            "read pixel buffer must match written data exactly"
+        );
 
         // Verify consumer heartbeat
         assert!(producer.is_consumer_active(5000));

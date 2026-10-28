@@ -14,8 +14,7 @@
  */
 
 use crate::types::{
-    CameraCaptureConfig, CameraDeviceInfo, CameraSource, VirtualCameraSink,
-    VirtualCameraSinkConfig,
+    CameraCaptureConfig, CameraDeviceInfo, CameraSource, VirtualCameraSink, VirtualCameraSinkConfig,
 };
 
 /// Enumerates connected physical AVFoundation cameras on macOS.

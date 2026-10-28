@@ -57,8 +57,17 @@ mod tests {
         assert!(is_ir_camera_name("Camera Infrarossi", ""));
         assert!(is_ir_camera_name("Windows Hello Face Software Device", ""));
         assert!(is_ir_camera_name("RGB-IR Sensor", ""));
-        assert!(is_ir_camera_name("Webcam", r"\\?\usb#vid_04f2&pid_b6d9&mi_02#...sensor_camera..."));
-        assert!(!is_ir_camera_name("Logitech Brio 4K", r"\\?\usb#vid_046d..."));
-        assert!(!is_ir_camera_name("Integrated Camera", "usb-0000:00:14.0-8"));
+        assert!(is_ir_camera_name(
+            "Webcam",
+            r"\\?\usb#vid_04f2&pid_b6d9&mi_02#...sensor_camera..."
+        ));
+        assert!(!is_ir_camera_name(
+            "Logitech Brio 4K",
+            r"\\?\usb#vid_046d..."
+        ));
+        assert!(!is_ir_camera_name(
+            "Integrated Camera",
+            "usb-0000:00:14.0-8"
+        ));
     }
 }

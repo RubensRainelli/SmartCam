@@ -19,8 +19,8 @@ use windows::{
     core::{Interface, GUID, HRESULT, PCWSTR},
     Win32::{
         Foundation::{
-            BOOL, CLASS_E_CLASSNOTAVAILABLE, E_ACCESSDENIED, E_POINTER, HMODULE,
-            MAX_PATH, S_FALSE, S_OK,
+            BOOL, CLASS_E_CLASSNOTAVAILABLE, E_ACCESSDENIED, E_POINTER, HMODULE, MAX_PATH, S_FALSE,
+            S_OK,
         },
         System::{
             Com::IClassFactory,
@@ -49,11 +49,20 @@ unsafe fn register_in_root_hive(root: HKEY, module_path: &[u16]) -> bool {
     let inproc_key = format!("SOFTWARE\\Classes\\CLSID\\{}\\InprocServer32", CLSID_STR);
 
     let wide_clsid: Vec<u16> = clsid_key.encode_utf16().chain(std::iter::once(0)).collect();
-    let wide_inproc: Vec<u16> = inproc_key.encode_utf16().chain(std::iter::once(0)).collect();
+    let wide_inproc: Vec<u16> = inproc_key
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
 
-    let wide_desc: Vec<u16> = FRIENDLY_NAME.encode_utf16().chain(std::iter::once(0)).collect();
+    let wide_desc: Vec<u16> = FRIENDLY_NAME
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
     let wide_threading: Vec<u16> = "Both".encode_utf16().chain(std::iter::once(0)).collect();
-    let wide_tm_val: Vec<u16> = "ThreadingModel".encode_utf16().chain(std::iter::once(0)).collect();
+    let wide_tm_val: Vec<u16> = "ThreadingModel"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
 
     let mut hkey = HKEY::default();
     let status = RegCreateKeyExW(
@@ -129,7 +138,10 @@ unsafe fn unregister_from_root_hive(root: HKEY) {
     let inproc_key = format!("SOFTWARE\\Classes\\CLSID\\{}\\InprocServer32", CLSID_STR);
     let clsid_key = format!("SOFTWARE\\Classes\\CLSID\\{}", CLSID_STR);
 
-    let wide_inproc: Vec<u16> = inproc_key.encode_utf16().chain(std::iter::once(0)).collect();
+    let wide_inproc: Vec<u16> = inproc_key
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
     let wide_clsid: Vec<u16> = clsid_key.encode_utf16().chain(std::iter::once(0)).collect();
 
     let _ = RegDeleteKeyW(root, PCWSTR(wide_inproc.as_ptr()));

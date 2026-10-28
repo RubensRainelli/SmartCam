@@ -49,6 +49,7 @@ type PfnMfCreateVirtualCamera = unsafe extern "system" fn(
 /// Media Foundation Virtual Camera Sink (`MfVirtualCameraSink`).
 /// Manages high-performance shared-memory frame transfer to the Media Foundation Virtual Camera
 /// source driver, optionally registering dynamic session virtual camera on Windows 11 21H2+.
+#[derive(Default)]
 pub struct MfVirtualCameraSink {
     ipc: Option<SharedFrameIpc>,
     vcam_handle: Option<IMFVirtualCamera>,
@@ -59,19 +60,6 @@ pub struct MfVirtualCameraSink {
 }
 
 unsafe impl Send for MfVirtualCameraSink {}
-
-impl Default for MfVirtualCameraSink {
-    fn default() -> Self {
-        Self {
-            ipc: None,
-            vcam_handle: None,
-            vcam_dll: None,
-            frame_count: 0,
-            mf_started: false,
-            config: VirtualCameraSinkConfig::default(),
-        }
-    }
-}
 
 impl MfVirtualCameraSink {
     pub fn new() -> Self {
@@ -86,7 +74,8 @@ impl VirtualCameraSink for MfVirtualCameraSink {
 
         unsafe {
             let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
-            if hr.is_err() && hr != windows::core::HRESULT(-2147417850) { // RPC_E_CHANGED_MODE
+            if hr.is_err() && hr != windows::core::HRESULT(-2147417850) {
+                // RPC_E_CHANGED_MODE
                 return false;
             }
 
@@ -118,12 +107,21 @@ impl VirtualCameraSink for MfVirtualCameraSink {
             if let Some(h_dll) = dll {
                 self.vcam_dll = Some(h_dll);
                 let proc_name = std::ffi::CString::new("MFCreateVirtualCamera").unwrap();
-                let proc = GetProcAddress(h_dll, windows::core::PCSTR(proc_name.as_ptr() as *const u8));
+                let proc =
+                    GetProcAddress(h_dll, windows::core::PCSTR(proc_name.as_ptr() as *const u8));
 
                 if let Some(pfn_ptr) = proc {
                     let pfn: PfnMfCreateVirtualCamera = std::mem::transmute(pfn_ptr);
-                    let wide_name: Vec<u16> = self.config.friendly_name.encode_utf16().chain(std::iter::once(0)).collect();
-                    let wide_clsid: Vec<u16> = SMARTCAM_MF_CLSID_STR.encode_utf16().chain(std::iter::once(0)).collect();
+                    let wide_name: Vec<u16> = self
+                        .config
+                        .friendly_name
+                        .encode_utf16()
+                        .chain(std::iter::once(0))
+                        .collect();
+                    let wide_clsid: Vec<u16> = SMARTCAM_MF_CLSID_STR
+                        .encode_utf16()
+                        .chain(std::iter::once(0))
+                        .collect();
 
                     let mut vcam: Option<IMFVirtualCamera> = None;
                     let create_hr = pfn(
@@ -191,7 +189,10 @@ impl VirtualCameraSink for MfVirtualCameraSink {
     }
 
     fn is_consumer_active(&self) -> bool {
-        self.ipc.as_ref().map(|i| i.is_consumer_active(2000)).unwrap_or(false)
+        self.ipc
+            .as_ref()
+            .map(|i| i.is_consumer_active(2000))
+            .unwrap_or(false)
     }
 
     fn shutdown(&mut self) {

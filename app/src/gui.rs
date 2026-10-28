@@ -140,7 +140,7 @@ pub(crate) enum UiAction {
     SelectAspectRatio(u8),      // 0 = "16:9", 1 = "4:3", 2 = "1:1", 3 = "9:16"
     SelectResolutionPreset(u8), // 0 = "1080p", 1 = "900p", 2 = "720p", 3 = "540p", 4 = "480p", 5 = "360p", 6 = "240p"
     SelectOutputFps(u32),       // 60, 30, 24, 15, 10
-    SelectAiEngineMode(i32),    // 0 = Auto/Ibrido, 1 = Sagoma & Volto AI, 2 = Differenza Sfondo (Telo Virtuale)
+    SelectAiEngineMode(i32), // 0 = Auto/Ibrido, 1 = Sagoma & Volto AI, 2 = Differenza Sfondo (Telo Virtuale)
     AiBgTolDec,
     AiBgTolInc,
     // Consumer Aspect Ratio Presets (kept as aliases)
@@ -268,7 +268,8 @@ impl AppGuiState {
         let mut diag = collect_diagnostics(&repo_root, true);
 
         // Select first non-IR webcam by default if current index is IR or out of range
-        let best_cam = select_best_default_camera_index(&diag.physical_cameras, cfg.camera_input.device_index);
+        let best_cam =
+            select_best_default_camera_index(&diag.physical_cameras, cfg.camera_input.device_index);
         if best_cam != cfg.camera_input.device_index {
             cfg.camera_input.device_index = best_cam;
             let _ = cfg.save_to_file(&config_path);
@@ -298,7 +299,8 @@ impl AppGuiState {
         let pefl_already_accepted = is_pefl_accepted(&repo_root);
         let effective_start_minimized = start_minimized && pefl_already_accepted;
 
-        let mut pipeline = SmartCamPipelineInstance::new(&repo_root, &cfg, &diag.active_build_variant);
+        let mut pipeline =
+            SmartCamPipelineInstance::new(&repo_root, &cfg, &diag.active_build_variant);
         pipeline.sync_face_and_silhouette_settings(
             &cfg,
             plugin_registry.is_plugin_enabled(PLUGIN_ID_MULTI_PERSON),
@@ -307,8 +309,12 @@ impl AppGuiState {
         // Smart Hardware Benchmark on Startup (only runs automatically once per hardware fingerprint
         // after PEFL acceptance; otherwise loads cached report or runs when PEFL is accepted)
         let (benchmark_report, auto_bench_ran) = if pefl_already_accepted {
-            let (rep, ran_now) = load_or_run_benchmark_on_startup(&repo_root, pipeline.lib.as_ref());
-            if ran_now && cfg.compute_backend == "auto" && cfg.compositor.simd_acceleration == "auto" {
+            let (rep, ran_now) =
+                load_or_run_benchmark_on_startup(&repo_root, pipeline.lib.as_ref());
+            if ran_now
+                && cfg.compute_backend == "auto"
+                && cfg.compositor.simd_acceleration == "auto"
+            {
                 cfg.compute_backend = rep.recommended_backend.clone();
                 cfg.compositor.compute_backend = rep.recommended_backend.clone();
                 cfg.compositor.simd_acceleration = rep.recommended_simd.clone();
@@ -320,9 +326,8 @@ impl AppGuiState {
             (rep, ran_now)
         } else {
             // Load cached report if present, or defer actual execution until PEFL is accepted
-            let cached = crate::benchmark::load_benchmark_report(&repo_root).unwrap_or_else(|| {
-                run_hardware_benchmark_suite(&repo_root, pipeline.lib.as_ref())
-            });
+            let cached = crate::benchmark::load_benchmark_report(&repo_root)
+                .unwrap_or_else(|| run_hardware_benchmark_suite(&repo_root, pipeline.lib.as_ref()));
             (cached, false)
         };
 
@@ -374,7 +379,11 @@ impl AppGuiState {
 
         let init_fps = cfg.camera_input.fps as f32;
         let init_landmarks = cfg.segmentation.ai_selfie.calib_landmarks;
-        let init_step = if cfg.segmentation.ai_selfie.face_calibrated { 5 } else { 0 };
+        let init_step = if cfg.segmentation.ai_selfie.face_calibrated {
+            5
+        } else {
+            0
+        };
         let init_port_text = cfg.phone_camera_port.to_string();
 
         Self {
@@ -521,15 +530,16 @@ impl AppGuiState {
             self.raw_capture_buf.resize(needed_raw, 255);
         }
 
-        if let Some((w, h)) = self
-            .plugin_registry
-            .read_active_camera_plugin_frame(&mut self.raw_capture_buf, target_w, target_h)
-        {
+        if let Some((w, h)) = self.plugin_registry.read_active_camera_plugin_frame(
+            &mut self.raw_capture_buf,
+            target_w,
+            target_h,
+        ) {
             self.raw_w = w;
             self.raw_h = h;
-        } else if let Some((w, h)) = self
-            .pipeline
-            .read_camera_frame(&mut self.raw_capture_buf, target_w, target_h)
+        } else if let Some((w, h)) =
+            self.pipeline
+                .read_camera_frame(&mut self.raw_capture_buf, target_w, target_h)
         {
             self.raw_w = w;
             self.raw_h = h;
@@ -544,9 +554,9 @@ impl AppGuiState {
             );
         }
 
-        let (ow, oh) = self
-            .pipeline
-            .process_frame(&self.raw_capture_buf, self.raw_w, self.raw_h, &self.cfg);
+        let (ow, oh) =
+            self.pipeline
+                .process_frame(&self.raw_capture_buf, self.raw_w, self.raw_h, &self.cfg);
         self.out_w = ow;
         self.out_h = oh;
 
@@ -580,7 +590,10 @@ impl AppGuiState {
     }
 
     pub fn is_selected_camera_ir(&self) -> bool {
-        if self.plugin_registry.is_plugin_enabled(PLUGIN_ID_PHONE_CAMERA) {
+        if self
+            .plugin_registry
+            .is_plugin_enabled(PLUGIN_ID_PHONE_CAMERA)
+        {
             return false;
         }
         self.selected_camera_entry()
@@ -589,7 +602,11 @@ impl AppGuiState {
     }
 
     pub fn active_background_short_name(&self) -> String {
-        let p = self.cfg.compositor.background_image_path.to_ascii_lowercase();
+        let p = self
+            .cfg
+            .compositor
+            .background_image_path
+            .to_ascii_lowercase();
         if p.contains("preset_1") || p.contains("studio_blue") {
             "Studio Blu".to_string()
         } else if p.contains("preset_2") || p.contains("warm") {
@@ -652,15 +669,16 @@ impl AppGuiState {
         }
 
         // 1. Check if a CameraInput plugin (such as Smartphone Camera or WebRTC/RTSP) is enabled
-        if let Some((w, h)) = self
-            .plugin_registry
-            .read_active_camera_plugin_frame(&mut self.raw_capture_buf, target_w, target_h)
-        {
+        if let Some((w, h)) = self.plugin_registry.read_active_camera_plugin_frame(
+            &mut self.raw_capture_buf,
+            target_w,
+            target_h,
+        ) {
             self.raw_w = w;
             self.raw_h = h;
-        } else if let Some((w, h)) = self
-            .pipeline
-            .read_camera_frame(&mut self.raw_capture_buf, target_w, target_h)
+        } else if let Some((w, h)) =
+            self.pipeline
+                .read_camera_frame(&mut self.raw_capture_buf, target_w, target_h)
         {
             self.raw_w = w;
             self.raw_h = h;
@@ -679,9 +697,12 @@ impl AppGuiState {
         if let Some(deadline) = self.bg_capture_countdown_end {
             if Instant::now() >= deadline {
                 self.bg_capture_countdown_end = None;
-                let (ow_calc, oh_calc) = self
-                    .pipeline
-                    .process_frame(&self.raw_capture_buf, self.raw_w, self.raw_h, &self.cfg);
+                let (ow_calc, oh_calc) = self.pipeline.process_frame(
+                    &self.raw_capture_buf,
+                    self.raw_w,
+                    self.raw_h,
+                    &self.cfg,
+                );
                 let framed_snapshot = self.pipeline.framed_buf.clone();
                 if !framed_snapshot.is_empty() && ow_calc > 0 && oh_calc > 0 {
                     self.pipeline
@@ -703,9 +724,9 @@ impl AppGuiState {
             }
         }
 
-        let (ow, oh) = self
-            .pipeline
-            .process_frame(&self.raw_capture_buf, self.raw_w, self.raw_h, &self.cfg);
+        let (ow, oh) =
+            self.pipeline
+                .process_frame(&self.raw_capture_buf, self.raw_w, self.raw_h, &self.cfg);
         self.out_w = ow;
         self.out_h = oh;
 
@@ -756,8 +777,11 @@ impl AppGuiState {
         self.out_w = self.cfg.framing_output.output_width;
         self.out_h = self.cfg.framing_output.output_height;
         self.pipeline.update_greenscreen_config(&self.cfg);
-        let multi_active = self.plugin_registry.is_plugin_enabled(PLUGIN_ID_MULTI_PERSON);
-        self.pipeline.sync_face_and_silhouette_settings(&self.cfg, multi_active);
+        let multi_active = self
+            .plugin_registry
+            .is_plugin_enabled(PLUGIN_ID_MULTI_PERSON);
+        self.pipeline
+            .sync_face_and_silhouette_settings(&self.cfg, multi_active);
         self.pipeline.rebuild_cropped_background(
             self.out_w.max(16),
             self.out_h.max(16),
@@ -775,8 +799,11 @@ impl AppGuiState {
         self.cfg.enabled_plugins = self.plugin_registry.enabled_plugin_ids();
         self.cfg.phone_camera_url = self.plugin_registry.phone_camera_endpoint();
         self.cfg.phone_camera_port = self.plugin_registry.phone_server_port();
-        let multi_active = self.plugin_registry.is_plugin_enabled(PLUGIN_ID_MULTI_PERSON);
-        self.pipeline.sync_face_and_silhouette_settings(&self.cfg, multi_active);
+        let multi_active = self
+            .plugin_registry
+            .is_plugin_enabled(PLUGIN_ID_MULTI_PERSON);
+        self.pipeline
+            .sync_face_and_silhouette_settings(&self.cfg, multi_active);
         let _ = self.plugin_registry.save_state(&self.repo_root);
         let _ = self.cfg.save_to_file(&self.config_path);
         self.status_message = msg.to_string();
@@ -784,8 +811,12 @@ impl AppGuiState {
 
     pub fn switch_camera(&mut self, new_index: u32) {
         // If user switches physical camera, disable phone camera plugin so hardware webcam is shown
-        if self.plugin_registry.is_plugin_enabled(PLUGIN_ID_PHONE_CAMERA) {
-            self.plugin_registry.set_plugin_enabled(PLUGIN_ID_PHONE_CAMERA, false);
+        if self
+            .plugin_registry
+            .is_plugin_enabled(PLUGIN_ID_PHONE_CAMERA)
+        {
+            self.plugin_registry
+                .set_plugin_enabled(PLUGIN_ID_PHONE_CAMERA, false);
             self.cfg.enabled_plugins = self.plugin_registry.enabled_plugin_ids();
             let _ = self.plugin_registry.save_state(&self.repo_root);
         }
@@ -883,10 +914,18 @@ impl AppGuiState {
                 self.plugins_modal_open = false;
                 self.phone_port_input_focused = false;
                 let summary = self.plugin_registry.summary_line_it();
-                self.sync_and_save_plugins(&format!("✅ Configurazione Plugin salvata — {}", summary));
+                self.sync_and_save_plugins(&format!(
+                    "✅ Configurazione Plugin salvata — {}",
+                    summary
+                ));
             }
             UiAction::TogglePluginByIndex(idx) => {
-                if let Some(pid) = self.plugin_registry.plugins().get(idx).map(|p| p.id.clone()) {
+                if let Some(pid) = self
+                    .plugin_registry
+                    .plugins()
+                    .get(idx)
+                    .map(|p| p.id.clone())
+                {
                     let new_state = self.plugin_registry.toggle_plugin(&pid).unwrap_or(false);
                     let pname = self
                         .plugin_registry
@@ -896,7 +935,11 @@ impl AppGuiState {
                     let msg = format!(
                         "🧩 Plugin \"{}\" {}",
                         pname,
-                        if new_state { "ATTIVATO ✅" } else { "DISATTIVATO ⚪" }
+                        if new_state {
+                            "ATTIVATO ✅"
+                        } else {
+                            "DISATTIVATO ⚪"
+                        }
                     );
                     self.sync_and_save_plugins(&msg);
                 }
@@ -919,7 +962,8 @@ impl AppGuiState {
                     ),
                 };
                 let _ = self.plugin_registry.set_phone_camera_endpoint(&url);
-                self.plugin_registry.set_plugin_enabled(PLUGIN_ID_PHONE_CAMERA, true);
+                self.plugin_registry
+                    .set_plugin_enabled(PLUGIN_ID_PHONE_CAMERA, true);
                 self.sync_and_save_plugins(&format!(
                     "📱 Fotocamera Smartphone impostata su: {}",
                     desc
@@ -951,7 +995,9 @@ impl AppGuiState {
             }
             UiAction::SetPhoneServerPortPreset(port) => {
                 self.phone_port_input_focused = false;
-                let actual = self.plugin_registry.set_phone_server_port(port.clamp(1024, 65535));
+                let actual = self
+                    .plugin_registry
+                    .set_phone_server_port(port.clamp(1024, 65535));
                 self.cfg.phone_camera_port = actual;
                 self.phone_port_input_text = actual.to_string();
                 let srv_url = self.plugin_registry.phone_server_url();
@@ -972,7 +1018,8 @@ impl AppGuiState {
             }
             UiAction::ActivatePhoneUsbOrHotspotBridge => {
                 let msg = self.plugin_registry.activate_phone_usb_or_hotspot_bridge();
-                self.plugin_registry.set_plugin_enabled(PLUGIN_ID_PHONE_CAMERA, true);
+                self.plugin_registry
+                    .set_plugin_enabled(PLUGIN_ID_PHONE_CAMERA, true);
                 self.sync_and_save_plugins(&msg);
             }
             UiAction::PastePhoneUrlFromClipboard => {
@@ -981,9 +1028,12 @@ impl AppGuiState {
                     if !trimmed.is_empty() {
                         let clean_digits = trimmed.trim_start_matches(':');
                         if let Ok(port_only) = clean_digits.parse::<u16>() {
-                            let actual = self.plugin_registry.set_phone_server_port(port_only.clamp(1024, 65535));
+                            let actual = self
+                                .plugin_registry
+                                .set_phone_server_port(port_only.clamp(1024, 65535));
                             self.cfg.phone_camera_port = actual;
-                            self.plugin_registry.set_plugin_enabled(PLUGIN_ID_PHONE_CAMERA, true);
+                            self.plugin_registry
+                                .set_plugin_enabled(PLUGIN_ID_PHONE_CAMERA, true);
                             let srv_url = self.plugin_registry.phone_server_url();
                             self.sync_and_save_plugins(&format!(
                                 "📋 Porta Smartphone {} incollata dagli Appunti! Apri sul telefono: {}",
@@ -991,11 +1041,13 @@ impl AppGuiState {
                             ));
                         } else {
                             if let Some(extracted_port) = extract_port_from_url_str(trimmed) {
-                                let actual = self.plugin_registry.set_phone_server_port(extracted_port);
+                                let actual =
+                                    self.plugin_registry.set_phone_server_port(extracted_port);
                                 self.cfg.phone_camera_port = actual;
                             }
                             let _ = self.plugin_registry.set_phone_camera_endpoint(trimmed);
-                            self.plugin_registry.set_plugin_enabled(PLUGIN_ID_PHONE_CAMERA, true);
+                            self.plugin_registry
+                                .set_plugin_enabled(PLUGIN_ID_PHONE_CAMERA, true);
                             self.sync_and_save_plugins(&format!(
                                 "📋 Indirizzo/Porta Fotocamera Smartphone incollato dagli Appunti: {} (Porta Server: {})",
                                 trimmed,
@@ -1004,7 +1056,8 @@ impl AppGuiState {
                         }
                     } else {
                         self.status_message =
-                            "⚠️ Gli Appunti non contengono una porta o un indirizzo URL valido.".to_string();
+                            "⚠️ Gli Appunti non contengono una porta o un indirizzo URL valido."
+                                .to_string();
                     }
                 } else {
                     self.status_message =
@@ -1079,7 +1132,11 @@ impl AppGuiState {
                 self.apply_and_save_config(&format!("✅ Modalità Sagoma impostata su: {}", lbl));
             }
             UiAction::ToggleSilhouetteMode => {
-                let next = if self.cfg.segmentation.ai_selfie.silhouette_mode == 0 { 1 } else { 0 };
+                let next = if self.cfg.segmentation.ai_selfie.silhouette_mode == 0 {
+                    1
+                } else {
+                    0
+                };
                 self.handle_action(hwnd, UiAction::SetSilhouetteMode(next));
             }
             UiAction::QuickToggleMultiPerson => {
@@ -1131,7 +1188,11 @@ impl AppGuiState {
                 self.status_message = format!(
                     "✅ Configurazione Hardware attiva: {} | AI: {}",
                     self.pipeline.simd_backend_label,
-                    if self.cfg.ai_enabled { "ATTIVA" } else { "DISATTIVATA (Ultra-Leggera)" }
+                    if self.cfg.ai_enabled {
+                        "ATTIVA"
+                    } else {
+                        "DISATTIVATA (Ultra-Leggera)"
+                    }
                 );
             }
             UiAction::SelectComputeBackend(b_id) => {
@@ -1189,7 +1250,8 @@ impl AppGuiState {
                 self.status_message =
                     "⏳ Esecuzione Benchmark Hardware (CPU AVX-512/AVX2/Scalar, Vulkan, OpenCL, CUDA, ROCm) in corso..."
                         .to_string();
-                let report = run_hardware_benchmark_suite(&self.repo_root, self.pipeline.lib.as_ref());
+                let report =
+                    run_hardware_benchmark_suite(&self.repo_root, self.pipeline.lib.as_ref());
                 // Restore current user hardware policy on the live engine after benchmarking
                 self.pipeline.apply_hardware_policy(&self.cfg);
                 self.status_message = format!(
@@ -1265,7 +1327,8 @@ impl AppGuiState {
                 let _ = std::process::Command::new("cmd")
                     .args(["/C", "start", "", &target])
                     .spawn();
-                self.status_message = "📜 Aperto documento integrale Licenza PEFL v1.0.".to_string();
+                self.status_message =
+                    "📜 Aperto documento integrale Licenza PEFL v1.0.".to_string();
             }
             UiAction::PeflAccept => {
                 save_pefl_acceptance(&self.repo_root, self.pefl_remember_7_days);
@@ -1319,7 +1382,8 @@ impl AppGuiState {
             UiAction::OpenWizard => {
                 self.close_non_pefl_modals();
                 self.wizard_step = 1;
-                self.status_message = "🧭 Guida Rapida di Primo Avvio aperta (Passo 1 di 3).".to_string();
+                self.status_message =
+                    "🧭 Guida Rapida di Primo Avvio aperta (Passo 1 di 3).".to_string();
             }
             UiAction::WizardNext => {
                 if self.wizard_step < 3 {
@@ -1363,7 +1427,9 @@ impl AppGuiState {
             }
             UiAction::StyleOriginal => {
                 self.cfg.segmentation.mode = "passthrough".to_string();
-                self.apply_and_save_config("🎥 Effetto attivo: Video Originale (Senza ritaglio sfondo).");
+                self.apply_and_save_config(
+                    "🎥 Effetto attivo: Video Originale (Senza ritaglio sfondo).",
+                );
             }
             UiAction::StyleBlur => {
                 self.cfg.segmentation.mode = "ai_selfie".to_string();
@@ -1407,7 +1473,9 @@ impl AppGuiState {
                 }
                 let p = self.cfg.compositor.background_image_path.clone();
                 let _ = self.pipeline.load_or_generate_background_image(&p);
-                self.apply_and_save_config("🖼️ Riempimento Sfondo: Immagine / Preset Studio attivo.");
+                self.apply_and_save_config(
+                    "🖼️ Riempimento Sfondo: Immagine / Preset Studio attivo.",
+                );
             }
             UiAction::BgModeBlur => {
                 if self.cfg.segmentation.mode == "passthrough" {
@@ -1616,7 +1684,8 @@ impl AppGuiState {
                 unsafe {
                     apply_window_and_tray_icon(hwnd, self);
                 }
-                self.status_message = format!("🎨 Icona App & System Tray cambiata in: {}", theme_label);
+                self.status_message =
+                    format!("🎨 Icona App & System Tray cambiata in: {}", theme_label);
             }
             UiAction::ToggleDropdown(kind) => {
                 if self.open_dropdown == Some(kind) {
@@ -1703,7 +1772,10 @@ impl AppGuiState {
                     2 => "Differenza Sfondo (Telo Verde Virtuale Anti-LED) — ⚠️ Tieni webcam/notebook su superficie statica!",
                     _ => "Auto (Sagoma AI + Sfondo Catturato)",
                 };
-                self.apply_and_save_config(&format!("🧠 Motore Scontorno impostato su: {}", m_desc));
+                self.apply_and_save_config(&format!(
+                    "🧠 Motore Scontorno impostato su: {}",
+                    m_desc
+                ));
             }
             UiAction::AiBgTolDec => {
                 self.cfg.segmentation.ai_selfie.bg_diff_tolerance =
@@ -1731,9 +1803,14 @@ impl AppGuiState {
                 self.cfg.segmentation.mode = "green_screen".to_string();
                 let (w, h) = (self.out_w, self.out_h);
                 let frame_clone = self.pipeline.framed_buf.clone();
-                let (hmin, hmax, smin, vmin) = self
-                    .pipeline
-                    .auto_calibrate_greenscreen(&frame_clone, w, h, -1, -1, &mut self.cfg);
+                let (hmin, hmax, smin, vmin) = self.pipeline.auto_calibrate_greenscreen(
+                    &frame_clone,
+                    w,
+                    h,
+                    -1,
+                    -1,
+                    &mut self.cfg,
+                );
                 let msg = format!(
                     "🪄 Auto-Calibrazione Telo Verde completata! Hue=[{}..{}], SatMin={}, ValMin={}",
                     hmin, hmax, smin, vmin
@@ -1749,12 +1826,16 @@ impl AppGuiState {
                 self.status_message =
                     "🛡️ Richiesta autorizzazione UAC per registrare il driver SmartCam..."
                         .to_string();
-                let (ok, msg) = invoke_driver_install(&self.repo_root, &self.diag.active_build_variant);
+                let (ok, msg) =
+                    invoke_driver_install(&self.repo_root, &self.diag.active_build_variant);
                 self.diag = collect_diagnostics(&self.repo_root, true);
                 self.status_message = if ok {
                     "✅ Driver \"SmartCam\" registrato correttamente in Windows 11!".to_string()
                 } else {
-                    format!("⚠️ Registrazione driver: {}", msg.lines().last().unwrap_or("annullata"))
+                    format!(
+                        "⚠️ Registrazione driver: {}",
+                        msg.lines().last().unwrap_or("annullata")
+                    )
                 };
             }
             UiAction::OpenSideBySideWeb => {
@@ -1786,8 +1867,13 @@ impl AppGuiState {
             }
             UiAction::HueMaxDec => {
                 let min = self.cfg.segmentation.green_screen.hue_min;
-                self.cfg.segmentation.green_screen.hue_max =
-                    self.cfg.segmentation.green_screen.hue_max.saturating_sub(2).max(min);
+                self.cfg.segmentation.green_screen.hue_max = self
+                    .cfg
+                    .segmentation
+                    .green_screen
+                    .hue_max
+                    .saturating_sub(2)
+                    .max(min);
                 self.apply_and_save_config("Aggiornato Hue Max.");
             }
             UiAction::HueMaxInc => {
@@ -1806,8 +1892,13 @@ impl AppGuiState {
                 self.apply_and_save_config("Aggiornato Sat Min.");
             }
             UiAction::SatMaxDec => {
-                self.cfg.segmentation.green_screen.sat_max =
-                    self.cfg.segmentation.green_screen.sat_max.saturating_sub(5).max(50);
+                self.cfg.segmentation.green_screen.sat_max = self
+                    .cfg
+                    .segmentation
+                    .green_screen
+                    .sat_max
+                    .saturating_sub(5)
+                    .max(50);
                 self.apply_and_save_config("Aggiornato Sat Max.");
             }
             UiAction::SatMaxInc => {
@@ -1826,8 +1917,13 @@ impl AppGuiState {
                 self.apply_and_save_config("Aggiornato Val Min.");
             }
             UiAction::ValMaxDec => {
-                self.cfg.segmentation.green_screen.val_max =
-                    self.cfg.segmentation.green_screen.val_max.saturating_sub(5).max(50);
+                self.cfg.segmentation.green_screen.val_max = self
+                    .cfg
+                    .segmentation
+                    .green_screen
+                    .val_max
+                    .saturating_sub(5)
+                    .max(50);
                 self.apply_and_save_config("Aggiornato Val Max.");
             }
             UiAction::ValMaxInc => {
@@ -1845,8 +1941,12 @@ impl AppGuiState {
                 self.apply_and_save_config("Aggiornato Kernel Morfologia.");
             }
             UiAction::BlurDec => {
-                self.cfg.segmentation.green_screen.blur_radius =
-                    self.cfg.segmentation.green_screen.blur_radius.saturating_sub(1);
+                self.cfg.segmentation.green_screen.blur_radius = self
+                    .cfg
+                    .segmentation
+                    .green_screen
+                    .blur_radius
+                    .saturating_sub(1);
                 self.apply_and_save_config("Aggiornata Morbidezza Bordi (Blur).");
             }
             UiAction::BlurInc => {
@@ -1899,8 +1999,12 @@ impl AppGuiState {
                 self.apply_and_save_config("🎨 Cambiato Colore Sfondo Virtuale RGB.");
             }
             UiAction::BgBlurDec => {
-                self.cfg.compositor.background_blur_radius =
-                    self.cfg.compositor.background_blur_radius.saturating_sub(2).max(3);
+                self.cfg.compositor.background_blur_radius = self
+                    .cfg
+                    .compositor
+                    .background_blur_radius
+                    .saturating_sub(2)
+                    .max(3);
                 self.apply_and_save_config("Aggiornata Intensità Sfocatura Sfondo.");
             }
             UiAction::BgBlurInc => {
@@ -1921,7 +2025,9 @@ impl AppGuiState {
                 self.apply_and_save_config(&format!("⚡ Motore SIMD impostato su: {}", label));
             }
             UiAction::SaveConfigYaml => {
-                self.apply_and_save_config("💾 Configurazione salvata in config/default_config.yaml!");
+                self.apply_and_save_config(
+                    "💾 Configurazione salvata in config/default_config.yaml!",
+                );
             }
         }
     }
@@ -1944,7 +2050,10 @@ fn extract_port_from_url_str(s: &str) -> Option<u16> {
     };
     let host_port = after_scheme.split('/').next().unwrap_or(after_scheme);
     let (_, port_part) = host_port.rsplit_once(':')?;
-    let digits: String = port_part.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let digits: String = port_part
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
     let p: u16 = digits.parse().ok()?;
     if p >= 1024 {
         Some(p)
@@ -2039,14 +2148,7 @@ pub unsafe fn load_theme_icon(repo_root: &Path, theme: &str, size: i32) -> HICON
     };
 
     let hinst = GetModuleHandleW(std::ptr::null());
-    let h_res = LoadImageW(
-        hinst,
-        make_int_resource(res_id),
-        IMAGE_ICON,
-        size,
-        size,
-        0,
-    );
+    let h_res = LoadImageW(hinst, make_int_resource(res_id), IMAGE_ICON, size, size, 0);
     if !h_res.is_null() {
         return h_res;
     }
@@ -2185,12 +2287,19 @@ unsafe fn show_tray_context_menu(hwnd: HWND, app: &mut AppGuiState) {
     let t_bench = to_wstring("⚡ Centro Prestazioni, GPU/CPU, AVX & Benchmark...");
     AppendMenuW(hmenu, MF_STRING, CMD_TRAY_BENCHMARK, t_bench.as_ptr());
     let t_run_bench = to_wstring("🚀 Riesegui Benchmark Hardware Ora");
-    AppendMenuW(hmenu, MF_STRING, CMD_TRAY_RUN_BENCHMARK_NOW, t_run_bench.as_ptr());
+    AppendMenuW(
+        hmenu,
+        MF_STRING,
+        CMD_TRAY_RUN_BENCHMARK_NOW,
+        t_run_bench.as_ptr(),
+    );
     AppendMenuW(hmenu, MF_SEPARATOR, 0, std::ptr::null());
 
     let is_orig = app.cfg.segmentation.mode == "passthrough";
-    let is_blur = app.cfg.segmentation.mode == "ai_selfie" && app.cfg.compositor.background_mode == "blur";
-    let is_ai = app.cfg.segmentation.mode == "ai_selfie" && app.cfg.compositor.background_mode != "blur";
+    let is_blur =
+        app.cfg.segmentation.mode == "ai_selfie" && app.cfg.compositor.background_mode == "blur";
+    let is_ai =
+        app.cfg.segmentation.mode == "ai_selfie" && app.cfg.compositor.background_mode != "blur";
     let is_gs = app.cfg.segmentation.mode == "green_screen";
 
     let t_orig = to_wstring("🎥 Modalità: Originale");
@@ -2250,7 +2359,12 @@ unsafe fn show_tray_context_menu(hwnd: HWND, app: &mut AppGuiState) {
     let t_auto = to_wstring("🚀 Avvia automaticamente con Windows");
     AppendMenuW(
         hmenu,
-        MF_STRING | if app.diag.autostart_enabled { MF_CHECKED } else { 0 },
+        MF_STRING
+            | if app.diag.autostart_enabled {
+                MF_CHECKED
+            } else {
+                0
+            },
         CMD_TRAY_AUTOSTART,
         t_auto.as_ptr(),
     );
@@ -2384,12 +2498,27 @@ unsafe fn draw_button(
     SelectObject(hdc, old_font);
 }
 
-unsafe fn draw_text_left(hdc: HDC, x: i32, y: i32, w: i32, h: i32, text: &str, color: DWORD, hfont: HFONT) {
+unsafe fn draw_text_left(
+    hdc: HDC,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    text: &str,
+    color: DWORD,
+    hfont: HFONT,
+) {
     let old = SelectObject(hdc, hfont);
     SetTextColor(hdc, color);
     let mut rc = RECT::new(x, y, x + w, y + h);
     let wt = to_wstring(text);
-    DrawTextW(hdc, wt.as_ptr(), -1, &mut rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    DrawTextW(
+        hdc,
+        wt.as_ptr(),
+        -1,
+        &mut rc,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+    );
     SelectObject(hdc, old);
 }
 
@@ -2398,7 +2527,13 @@ unsafe fn draw_text_center(hdc: HDC, rc: RECT, text: &str, color: DWORD, hfont: 
     SetTextColor(hdc, color);
     let mut r = rc;
     let wt = to_wstring(text);
-    DrawTextW(hdc, wt.as_ptr(), -1, &mut r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    DrawTextW(
+        hdc,
+        wt.as_ptr(),
+        -1,
+        &mut r,
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+    );
     SelectObject(hdc, old);
 }
 
@@ -2417,17 +2552,17 @@ unsafe fn register_button(
     app.hit_zones.push(HitZone { rect: rc, action });
 }
 
-unsafe fn draw_multiline_text(
-    hdc: HDC,
-    mut rc: RECT,
-    text: &str,
-    color: DWORD,
-    hfont: HFONT,
-) {
+unsafe fn draw_multiline_text(hdc: HDC, mut rc: RECT, text: &str, color: DWORD, hfont: HFONT) {
     let old = SelectObject(hdc, hfont);
     SetTextColor(hdc, color);
     let wt = to_wstring(text);
-    DrawTextW(hdc, wt.as_ptr(), -1, &mut rc, DT_LEFT | DT_WORDBREAK | DT_NOPREFIX);
+    DrawTextW(
+        hdc,
+        wt.as_ptr(),
+        -1,
+        &mut rc,
+        DT_LEFT | DT_WORDBREAK | DT_NOPREFIX,
+    );
     SelectObject(hdc, old);
 }
 
@@ -2440,7 +2575,11 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
     let win_w = client_rc.width().max(100);
     let win_h = client_rc.height().max(100);
 
-    if app.backbuf_dc.is_null() || app.backbuf_bmp.is_null() || app.backbuf_w != win_w || app.backbuf_h != win_h {
+    if app.backbuf_dc.is_null()
+        || app.backbuf_bmp.is_null()
+        || app.backbuf_w != win_w
+        || app.backbuf_h != win_h
+    {
         if !app.backbuf_dc.is_null() {
             if !app.backbuf_old_bmp.is_null() {
                 SelectObject(app.backbuf_dc, app.backbuf_old_bmp);
@@ -2610,7 +2749,9 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
     FillRect(mem_dc, &cam_bar_rc, cam_br);
     DeleteObject(cam_br);
 
-    let phone_cam_active = app.plugin_registry.is_plugin_enabled(PLUGIN_ID_PHONE_CAMERA);
+    let phone_cam_active = app
+        .plugin_registry
+        .is_plugin_enabled(PLUGIN_ID_PHONE_CAMERA);
     let cam_label = if phone_cam_active {
         format!(
             "📱 Fotocamera Smartphone ({})",
@@ -2797,7 +2938,12 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
         || app.cfg.segmentation.ai_selfie.engine_mode == 2;
 
     if app.is_selected_camera_ir() {
-        let ir_rc = RECT::new(monitor_rc.left + 12, monitor_rc.top + 6, monitor_rc.right - 12, monitor_rc.top + 32);
+        let ir_rc = RECT::new(
+            monitor_rc.left + 12,
+            monitor_rc.top + 6,
+            monitor_rc.right - 12,
+            monitor_rc.top + 32,
+        );
         let ir_br = CreateSolidBrush(rgb(113, 63, 18));
         FillRect(mem_dc, &ir_rc, ir_br);
         DeleteObject(ir_br);
@@ -2812,7 +2958,12 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
             f_small,
         );
     } else if show_static_warn && app.bg_capture_countdown_end.is_none() {
-        let warn_rc = RECT::new(monitor_rc.left + 12, monitor_rc.top + 6, monitor_rc.right - 12, monitor_rc.top + 32);
+        let warn_rc = RECT::new(
+            monitor_rc.left + 12,
+            monitor_rc.top + 6,
+            monitor_rc.right - 12,
+            monitor_rc.top + 32,
+        );
         let w_fill = CreateSolidBrush(rgb(20, 63, 40));
         FillRect(mem_dc, &warn_rc, w_fill);
         DeleteObject(w_fill);
@@ -2830,10 +2981,7 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
 
     // 3-Second Countdown Overlay for Virtual Green Screen (Real Background Capture)
     if let Some(deadline) = app.bg_capture_countdown_end {
-        let rem_secs = deadline
-            .saturating_duration_since(Instant::now())
-            .as_secs()
-            + 1;
+        let rem_secs = deadline.saturating_duration_since(Instant::now()).as_secs() + 1;
         let banner_rc = RECT::new(
             app.video_preview_rect.left + 20,
             app.video_preview_rect.top + 20,
@@ -2849,14 +2997,24 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
 
         draw_text_center(
             mem_dc,
-            RECT::new(banner_rc.left + 8, banner_rc.top + 6, banner_rc.right - 8, banner_rc.top + 32),
+            RECT::new(
+                banner_rc.left + 8,
+                banner_rc.top + 6,
+                banner_rc.right - 8,
+                banner_rc.top + 32,
+            ),
             "📸 Spostati dall'inquadratura per creare il tuo Telo Virtuale...",
             rgb(254, 240, 138),
             f_sub,
         );
         draw_text_center(
             mem_dc,
-            RECT::new(banner_rc.left + 8, banner_rc.top + 32, banner_rc.right - 8, banner_rc.top + 66),
+            RECT::new(
+                banner_rc.left + 8,
+                banner_rc.top + 32,
+                banner_rc.right - 8,
+                banner_rc.top + 66,
+            ),
             &format!("Cattura Sfondo Reale tra {}...", rem_secs.min(3)),
             rgb(56, 189, 248),
             f_title,
@@ -2872,7 +3030,11 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
 
     // Bottom Telemetry Pill inside Studio Monitor (`y = 464..488`)
     let (scx, scy) = app.pipeline.get_subject_center();
-    let ai_state_str = if app.cfg.ai_enabled { "AI: ON" } else { "AI: OFF (Ultra-Light)" };
+    let ai_state_str = if app.cfg.ai_enabled {
+        "AI: ON"
+    } else {
+        "AI: OFF (Ultra-Light)"
+    };
     let sil_str = if app.cfg.segmentation.ai_selfie.silhouette_mode == 1 {
         "Solo Volto"
     } else {
@@ -2894,7 +3056,12 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
     );
     draw_text_center(
         mem_dc,
-        RECT::new(monitor_rc.left + 12, monitor_rc.bottom - 26, monitor_rc.right - 12, monitor_rc.bottom - 2),
+        RECT::new(
+            monitor_rc.left + 12,
+            monitor_rc.bottom - 26,
+            monitor_rc.right - 12,
+            monitor_rc.bottom - 2,
+        ),
         &overlay_text,
         rgb(148, 163, 184),
         f_small,
@@ -2912,8 +3079,10 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
     DeleteObject(cc_bd);
 
     let is_orig = app.cfg.segmentation.mode == "passthrough";
-    let is_blur = app.cfg.segmentation.mode == "ai_selfie" && app.cfg.compositor.background_mode == "blur";
-    let is_ai_virtual = app.cfg.segmentation.mode == "ai_selfie" && app.cfg.compositor.background_mode != "blur";
+    let is_blur =
+        app.cfg.segmentation.mode == "ai_selfie" && app.cfg.compositor.background_mode == "blur";
+    let is_ai_virtual =
+        app.cfg.segmentation.mode == "ai_selfie" && app.cfg.compositor.background_mode != "blur";
     let is_green = app.cfg.segmentation.mode == "green_screen";
 
     // Row 1 (`y = 500..536`, height 36): 4 Style Buttons + Gallery/Crop + 3s Room Capture
@@ -3116,7 +3285,9 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
     );
     rmx += mir_btn_w + 6;
 
-    let mp_active = app.plugin_registry.is_plugin_enabled(PLUGIN_ID_MULTI_PERSON);
+    let mp_active = app
+        .plugin_registry
+        .is_plugin_enabled(PLUGIN_ID_MULTI_PERSON);
     register_button(
         mem_dc,
         app,
@@ -3246,7 +3417,12 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
     register_button(
         mem_dc,
         app,
-        RECT::new(btn_minus_x + 86, r2_y0 + 3, (btn_minus_x + 118).min(win_w - 24), r2_y1 - 3),
+        RECT::new(
+            btn_minus_x + 86,
+            r2_y0 + 3,
+            (btn_minus_x + 118).min(win_w - 24),
+            r2_y1 - 3,
+        ),
         "+",
         UiAction::AiBgTolInc,
         false,
@@ -3518,14 +3694,24 @@ unsafe fn paint_face_calib_modal_overlay(
 
     draw_text_center(
         hdc,
-        RECT::new(inst_rc.left + 10, inst_rc.top + 4, inst_rc.right - 10, inst_rc.top + 28),
+        RECT::new(
+            inst_rc.left + 10,
+            inst_rc.top + 4,
+            inst_rc.right - 10,
+            inst_rc.top + 28,
+        ),
         step_title,
         rgb(255, 255, 255),
         f_sub,
     );
     draw_text_center(
         hdc,
-        RECT::new(inst_rc.left + 10, inst_rc.top + 28, inst_rc.right - 10, inst_rc.bottom - 4),
+        RECT::new(
+            inst_rc.left + 10,
+            inst_rc.top + 28,
+            inst_rc.right - 10,
+            inst_rc.bottom - 4,
+        ),
         step_sub,
         rgb(226, 232, 240),
         f_small,
@@ -3554,7 +3740,10 @@ unsafe fn paint_face_calib_modal_overlay(
     let py = photo_box_rc.top + (photo_box_rc.height() - draw_h) / 2;
     app.face_calib_photo_rect = RECT::new(px, py, px + draw_w, py + draw_h);
 
-    if !app.face_calib_snapshot_buf.is_empty() && app.face_calib_snap_w > 0 && app.face_calib_snap_h > 0 {
+    if !app.face_calib_snapshot_buf.is_empty()
+        && app.face_calib_snap_w > 0
+        && app.face_calib_snap_h > 0
+    {
         let mut bmi: BITMAPINFO = Default::default();
         bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as DWORD;
         bmi.bmiHeader.biWidth = app.face_calib_snap_w as LONG;
@@ -3596,8 +3785,18 @@ unsafe fn paint_face_calib_modal_overlay(
         let eye_cy = (pts[0].1 + pts[1].1) * 0.5;
         let head_cx = (eye_cx * 0.45 + pts[2].0 * 0.35 + pts[3].0 * 0.20).clamp(0.10, 0.90);
         let head_cy = (eye_cy * 0.48 + pts[2].1 * 0.32 + pts[3].1 * 0.20).clamp(0.10, 0.88);
-        let h_rx = app.cfg.segmentation.ai_selfie.calib_head_rx.clamp(0.05, 0.36);
-        let h_ry = app.cfg.segmentation.ai_selfie.calib_head_ry.clamp(0.08, 0.46);
+        let h_rx = app
+            .cfg
+            .segmentation
+            .ai_selfie
+            .calib_head_rx
+            .clamp(0.05, 0.36);
+        let h_ry = app
+            .cfg
+            .segmentation
+            .ai_selfie
+            .calib_head_ry
+            .clamp(0.08, 0.46);
 
         let el_l = px + ((head_cx - h_rx * 1.15) * draw_w as f32) as i32;
         let el_r = px + ((head_cx + h_rx * 1.15) * draw_w as f32) as i32;
@@ -3673,7 +3872,10 @@ unsafe fn paint_face_calib_modal_overlay(
         let (tag_l, tag_r) = if place_left {
             ((cx - 96).max(px + 2), (cx - 8).max(px + 90))
         } else {
-            ((cx + 8).min(px + draw_w - 92), (cx + 96).min(px + draw_w - 2))
+            (
+                (cx + 8).min(px + draw_w - 92),
+                (cx + 96).min(px + draw_w - 2),
+            )
         };
         let (tag_t, tag_b) = if i <= 1 {
             // Place eye labels slightly above the eye line to leave the bridge and other eye completely clear
@@ -3949,7 +4151,12 @@ unsafe fn paint_plugins_modal_overlay(
             DeleteObject(black_br);
             draw_text_center(
                 hdc,
-                RECT::new(qr_x0 - 16, qr_y0 + qr_box_sz + 2, item_rc.right - 8, py + row_h - 4),
+                RECT::new(
+                    qr_x0 - 16,
+                    qr_y0 + qr_box_sz + 2,
+                    item_rc.right - 8,
+                    py + row_h - 4,
+                ),
                 "📱 Inquadra QR",
                 rgb(254, 240, 138),
                 f_small,
@@ -3957,7 +4164,12 @@ unsafe fn paint_plugins_modal_overlay(
 
             let left_panel_right = qr_x0 - 12;
             let url_banner_y = py + 79;
-            let url_banner = RECT::new(item_rc.left + 12, url_banner_y, left_panel_right, url_banner_y + 50);
+            let url_banner = RECT::new(
+                item_rc.left + 12,
+                url_banner_y,
+                left_panel_right,
+                url_banner_y + 50,
+            );
             let ub_fill = CreateSolidBrush(if srv_running {
                 rgb(15, 52, 43)
             } else {
@@ -4014,7 +4226,12 @@ unsafe fn paint_plugins_modal_overlay(
             register_button(
                 hdc,
                 app,
-                RECT::new(url_banner.right - 348, url_banner.top + 8, url_banner.right - 182, url_banner.bottom - 8),
+                RECT::new(
+                    url_banner.right - 348,
+                    url_banner.top + 8,
+                    url_banner.right - 182,
+                    url_banner.bottom - 8,
+                ),
                 &format!("🛡️ Sblocca Firewall ({})", cur_port),
                 UiAction::UnlockPhoneFirewall,
                 false,
@@ -4024,7 +4241,12 @@ unsafe fn paint_plugins_modal_overlay(
             register_button(
                 hdc,
                 app,
-                RECT::new(url_banner.right - 176, url_banner.top + 8, url_banner.right - 6, url_banner.bottom - 8),
+                RECT::new(
+                    url_banner.right - 176,
+                    url_banner.top + 8,
+                    url_banner.right - 6,
+                    url_banner.bottom - 8,
+                ),
                 "📶 Ponte USB / Hotspot",
                 UiAction::ActivatePhoneUsbOrHotspotBridge,
                 false,
@@ -4262,10 +4484,29 @@ unsafe fn paint_perf_modal_overlay(
         let bx = pad_x + (i as i32) * (b_col_w + 8);
         let (avail, sub_status) = if *bid == 0 {
             (true, "Selezione Ottimale".to_string())
-        } else if let Some(d) = app.benchmark_report.devices.iter().find(|d| d.backend_id == *bid as u32) {
-            (d.available, if d.available { "✓ Disponibile".to_string() } else { "Non supportato".to_string() })
+        } else if let Some(d) = app
+            .benchmark_report
+            .devices
+            .iter()
+            .find(|d| d.backend_id == *bid as u32)
+        {
+            (
+                d.available,
+                if d.available {
+                    "✓ Disponibile".to_string()
+                } else {
+                    "Non supportato".to_string()
+                },
+            )
         } else {
-            (*bid == 1, if *bid == 1 { "✓ Disponibile".to_string() } else { "Non supportato".to_string() })
+            (
+                *bid == 1,
+                if *bid == 1 {
+                    "✓ Disponibile".to_string()
+                } else {
+                    "Non supportato".to_string()
+                },
+            )
         };
         let is_sel = (cur_backend == *bkey || (cur_backend.is_empty() && *bid == 0)) && avail;
         let btn_lbl = format!("{} [{}]", blbl, sub_status);
@@ -4312,7 +4553,11 @@ unsafe fn paint_perf_modal_overlay(
         &format!(
             "2. Istruzioni Vettoriali CPU (Supporto PC: AVX2={} • AVX-512={}):",
             if cpu_supports_avx2() { "SÌ" } else { "NO" },
-            if bench_cpu_supports_avx512() { "SÌ" } else { "NO" }
+            if bench_cpu_supports_avx512() {
+                "SÌ"
+            } else {
+                "NO"
+            }
         ),
         rgb(248, 250, 252),
         f_sub,
@@ -4429,11 +4674,56 @@ unsafe fn paint_perf_modal_overlay(
     let th_br = CreateSolidBrush(rgb(30, 41, 59));
     FillRect(hdc, &th_rc, th_br);
     DeleteObject(th_br);
-    draw_text_left(hdc, pad_x + 12, cy + 2, 230, 20, "Configurazione / Profilo", rgb(148, 163, 184), f_small);
-    draw_text_left(hdc, pad_x + 250, cy + 2, 220, 20, "Stato Hardware su questo PC", rgb(148, 163, 184), f_small);
-    draw_text_left(hdc, pad_x + 480, cy + 2, 190, 20, "Punteggio Reale", rgb(148, 163, 184), f_small);
-    draw_text_left(hdc, pad_x + 680, cy + 2, 120, 20, "FPS Misurati", rgb(148, 163, 184), f_small);
-    draw_text_left(hdc, pad_x + 810, cy + 2, 180, 20, "Carico CPU (30 FPS)", rgb(148, 163, 184), f_small);
+    draw_text_left(
+        hdc,
+        pad_x + 12,
+        cy + 2,
+        230,
+        20,
+        "Configurazione / Profilo",
+        rgb(148, 163, 184),
+        f_small,
+    );
+    draw_text_left(
+        hdc,
+        pad_x + 250,
+        cy + 2,
+        220,
+        20,
+        "Stato Hardware su questo PC",
+        rgb(148, 163, 184),
+        f_small,
+    );
+    draw_text_left(
+        hdc,
+        pad_x + 480,
+        cy + 2,
+        190,
+        20,
+        "Punteggio Reale",
+        rgb(148, 163, 184),
+        f_small,
+    );
+    draw_text_left(
+        hdc,
+        pad_x + 680,
+        cy + 2,
+        120,
+        20,
+        "FPS Misurati",
+        rgb(148, 163, 184),
+        f_small,
+    );
+    draw_text_left(
+        hdc,
+        pad_x + 810,
+        cy + 2,
+        180,
+        20,
+        "Carico CPU (30 FPS)",
+        rgb(148, 163, 184),
+        f_small,
+    );
     cy += 26;
 
     let profiles_clone = app.benchmark_report.profiles.clone();
@@ -4451,9 +4741,16 @@ unsafe fn paint_perf_modal_overlay(
         }
         let r_rc = RECT::new(pad_x, cy, pad_x + inner_w, cy + row_h - 2);
         let hover = r_rc.contains(app.hover_pos.x, app.hover_pos.y);
-        let is_cur_active = app.cfg.compute_backend.eq_ignore_ascii_case(&p.compute_backend)
+        let is_cur_active = app
+            .cfg
+            .compute_backend
+            .eq_ignore_ascii_case(&p.compute_backend)
             && (p.simd_mode == "auto"
-                || app.cfg.compositor.simd_acceleration.eq_ignore_ascii_case(&p.simd_mode))
+                || app
+                    .cfg
+                    .compositor
+                    .simd_acceleration
+                    .eq_ignore_ascii_case(&p.simd_mode))
             && app.cfg.ai_enabled == p.ai_enabled;
 
         let row_bg = if p.recommended {
@@ -4574,7 +4871,10 @@ unsafe fn paint_perf_modal_overlay(
                 cy + 4,
                 175,
                 24,
-                &format!("~{:.1}% CPU ({:.2} ms)", p.estimated_cpu_load_pct, p.avg_frame_ms),
+                &format!(
+                    "~{:.1}% CPU ({:.2} ms)",
+                    p.estimated_cpu_load_pct, p.avg_frame_ms
+                ),
                 rgb(203, 213, 225),
                 f_small,
             );
@@ -4738,13 +5038,20 @@ unsafe fn paint_advanced_modal_overlay(
         ),
         (
             "Soglia Confidenza Maschera AI:",
-            format!("{:.0}% (EMA {:.0}%)", ai.confidence_threshold * 100.0, ai.temporal_smoothing * 100.0),
+            format!(
+                "{:.0}% (EMA {:.0}%)",
+                ai.confidence_threshold * 100.0,
+                ai.temporal_smoothing * 100.0
+            ),
             UiAction::AiConfDec,
             UiAction::AiConfInc,
         ),
         (
             "Raggio Sfocatura Sfondo Bokeh:",
-            format!("{} px (Colore RGB [{},{},{}])", bg_blur, rgb_col[0], rgb_col[1], rgb_col[2]),
+            format!(
+                "{} px (Colore RGB [{},{},{}])",
+                bg_blur, rgb_col[0], rgb_col[1], rgb_col[2]
+            ),
             UiAction::BgBlurDec,
             UiAction::BgBlurInc,
         ),
@@ -4788,7 +5095,10 @@ unsafe fn paint_advanced_modal_overlay(
         hdc,
         app,
         RECT::new(pad_x, cy, pad_x + third_w, cy + 32),
-        &format!("🔬 Morfologia: {}x{}", gs.morph_kernel_size, gs.morph_kernel_size),
+        &format!(
+            "🔬 Morfologia: {}x{}",
+            gs.morph_kernel_size, gs.morph_kernel_size
+        ),
         UiAction::MorphCycle,
         false,
         rgb(51, 65, 85),
@@ -4853,10 +5163,26 @@ unsafe fn paint_open_dropdown_menu(
 
     let items: Vec<(String, UiAction, bool)> = match kind {
         DropdownKind::AspectRatio => vec![
-            ("16:9 (Widescreen)".to_string(), UiAction::SelectAspectRatio(0), ar == "16:9"),
-            ("4:3 (Standard)".to_string(), UiAction::SelectAspectRatio(1), ar == "4:3"),
-            ("1:1 (Quadrato)".to_string(), UiAction::SelectAspectRatio(2), ar == "1:1"),
-            ("9:16 (Verticale)".to_string(), UiAction::SelectAspectRatio(3), ar == "9:16"),
+            (
+                "16:9 (Widescreen)".to_string(),
+                UiAction::SelectAspectRatio(0),
+                ar == "16:9",
+            ),
+            (
+                "4:3 (Standard)".to_string(),
+                UiAction::SelectAspectRatio(1),
+                ar == "4:3",
+            ),
+            (
+                "1:1 (Quadrato)".to_string(),
+                UiAction::SelectAspectRatio(2),
+                ar == "1:1",
+            ),
+            (
+                "9:16 (Verticale)".to_string(),
+                UiAction::SelectAspectRatio(3),
+                ar == "9:16",
+            ),
         ],
         DropdownKind::OutputResolution => {
             let presets = [
@@ -4872,7 +5198,9 @@ unsafe fn paint_open_dropdown_menu(
                 .iter()
                 .map(|(idx, code, label)| {
                     let (w, h) =
-                        crate::config::FramingOutputConfig::compute_output_dimensions_for_preset(&ar, code);
+                        crate::config::FramingOutputConfig::compute_output_dimensions_for_preset(
+                            &ar, code,
+                        );
                     (
                         format!("{} ({}×{})", label, w, h),
                         UiAction::SelectResolutionPreset(*idx),
@@ -4882,13 +5210,41 @@ unsafe fn paint_open_dropdown_menu(
                 .collect()
         }
         DropdownKind::OutputFps => vec![
-            ("60 FPS (Ultra Fluido)".to_string(), UiAction::SelectOutputFps(60), cur_fps == 60),
-            ("30 FPS (Standard)".to_string(), UiAction::SelectOutputFps(30), cur_fps == 30),
-            ("25 FPS (PAL)".to_string(), UiAction::SelectOutputFps(25), cur_fps == 25),
-            ("24 FPS (Cinema)".to_string(), UiAction::SelectOutputFps(24), cur_fps == 24),
-            ("20 FPS (Eco)".to_string(), UiAction::SelectOutputFps(20), cur_fps == 20),
-            ("15 FPS (Risparmio CPU)".to_string(), UiAction::SelectOutputFps(15), cur_fps == 15),
-            ("10 FPS (Minimo)".to_string(), UiAction::SelectOutputFps(10), cur_fps == 10),
+            (
+                "60 FPS (Ultra Fluido)".to_string(),
+                UiAction::SelectOutputFps(60),
+                cur_fps == 60,
+            ),
+            (
+                "30 FPS (Standard)".to_string(),
+                UiAction::SelectOutputFps(30),
+                cur_fps == 30,
+            ),
+            (
+                "25 FPS (PAL)".to_string(),
+                UiAction::SelectOutputFps(25),
+                cur_fps == 25,
+            ),
+            (
+                "24 FPS (Cinema)".to_string(),
+                UiAction::SelectOutputFps(24),
+                cur_fps == 24,
+            ),
+            (
+                "20 FPS (Eco)".to_string(),
+                UiAction::SelectOutputFps(20),
+                cur_fps == 20,
+            ),
+            (
+                "15 FPS (Risparmio CPU)".to_string(),
+                UiAction::SelectOutputFps(15),
+                cur_fps == 15,
+            ),
+            (
+                "10 FPS (Minimo)".to_string(),
+                UiAction::SelectOutputFps(10),
+                cur_fps == 10,
+            ),
         ],
         DropdownKind::SegmentationEngine => vec![
             (
@@ -4917,9 +5273,19 @@ unsafe fn paint_open_dropdown_menu(
         anchor.bottom + 1
     };
     let menu_w = anchor.width().max(220);
-    let menu_rc = RECT::new(anchor.left, menu_y0, anchor.left + menu_w, menu_y0 + total_h);
+    let menu_rc = RECT::new(
+        anchor.left,
+        menu_y0,
+        anchor.left + menu_w,
+        menu_y0 + total_h,
+    );
 
-    let shadow_rc = RECT::new(menu_rc.left + 3, menu_rc.top + 3, menu_rc.right + 3, menu_rc.bottom + 3);
+    let shadow_rc = RECT::new(
+        menu_rc.left + 3,
+        menu_rc.top + 3,
+        menu_rc.right + 3,
+        menu_rc.bottom + 3,
+    );
     let sh_br = CreateSolidBrush(rgb(5, 8, 14));
     FillRect(hdc, &shadow_rc, sh_br);
     DeleteObject(sh_br);
@@ -5316,7 +5682,11 @@ unsafe fn paint_crop_modal_overlay(
     let gal_y = y0 + 70;
     let thumb_card_w = 152;
     let thumb_card_h = 104;
-    let cur_bg_path_low = app.cfg.compositor.background_image_path.to_ascii_lowercase();
+    let cur_bg_path_low = app
+        .cfg
+        .compositor
+        .background_image_path
+        .to_ascii_lowercase();
 
     for i in 0..app.pipeline.studio_preset_thumbs.len() {
         let thumb_id = app.pipeline.studio_preset_thumbs[i].id;
@@ -5377,7 +5747,12 @@ unsafe fn paint_crop_modal_overlay(
 
         draw_text_center(
             hdc,
-            RECT::new(tx0 + 2, gal_y + 80, tx0 + thumb_card_w - 2, gal_y + thumb_card_h - 2),
+            RECT::new(
+                tx0 + 2,
+                gal_y + 80,
+                tx0 + thumb_card_w - 2,
+                gal_y + thumb_card_h - 2,
+            ),
             &thumb_label,
             if is_active {
                 rgb(255, 255, 255)
@@ -5525,7 +5900,12 @@ unsafe fn paint_crop_modal_overlay(
 
     draw_text_center(
         hdc,
-        RECT::new(prev_area.left, prev_area.top + 6, prev_area.right, prev_area.top + 28),
+        RECT::new(
+            prev_area.left,
+            prev_area.top + 6,
+            prev_area.right,
+            prev_area.top + 28,
+        ),
         "Anteprima Sfondo Ritagliato:",
         rgb(125, 211, 252),
         f_sub,
@@ -5575,7 +5955,12 @@ unsafe fn paint_crop_modal_overlay(
 
     draw_text_center(
         hdc,
-        RECT::new(prev_area.left + 8, prev_area.bottom - 28, prev_area.right - 8, prev_area.bottom - 4),
+        RECT::new(
+            prev_area.left + 8,
+            prev_area.bottom - 28,
+            prev_area.right - 8,
+            prev_area.bottom - 4,
+        ),
         &format!(
             "Zoom: {:.0}% | Pan: ({:.0}%, {:.0}%)",
             app.cfg.compositor.background_zoom * 100.0,
@@ -5587,7 +5972,16 @@ unsafe fn paint_crop_modal_overlay(
     );
 
     let ctrl_y = y0 + h_box - 82;
-    draw_text_left(hdc, x0 + 20, ctrl_y, 58, 30, "Zoom:", rgb(226, 232, 240), f_sub);
+    draw_text_left(
+        hdc,
+        x0 + 20,
+        ctrl_y,
+        58,
+        30,
+        "Zoom:",
+        rgb(226, 232, 240),
+        f_sub,
+    );
     register_button(
         hdc,
         app,
@@ -5607,7 +6001,12 @@ unsafe fn paint_crop_modal_overlay(
 
     let zoom_norm = ((app.cfg.compositor.background_zoom - 1.0) / 3.0).clamp(0.0, 1.0);
     let fill_w = (slider_rc.width() as f32 * zoom_norm).round() as i32;
-    let sl_fill = RECT::new(slider_rc.left, slider_rc.top, slider_rc.left + fill_w.max(6), slider_rc.bottom);
+    let sl_fill = RECT::new(
+        slider_rc.left,
+        slider_rc.top,
+        slider_rc.left + fill_w.max(6),
+        slider_rc.bottom,
+    );
     let sl_fg = CreateSolidBrush(rgb(2, 132, 199));
     FillRect(hdc, &sl_fill, sl_fg);
     DeleteObject(sl_fg);
@@ -5681,7 +6080,12 @@ unsafe fn paint_crop_modal_overlay(
     register_button(
         hdc,
         app,
-        RECT::new(x0 + w_box - 260, y0 + h_box - 44, x0 + w_box - 20, y0 + h_box - 12),
+        RECT::new(
+            x0 + w_box - 260,
+            y0 + h_box - 44,
+            x0 + w_box - 20,
+            y0 + h_box - 12,
+        ),
         "✅ Applica Sfondo e Chiudi",
         UiAction::CropApplyAndClose,
         true,
@@ -5724,7 +6128,16 @@ unsafe fn paint_wizard_overlay(
         2 => "🧭 Guida Rapida SmartCam — Passo 2 di 3: Scegli il tuo Effetto",
         _ => "🧭 Guida Rapida SmartCam — Passo 3 di 3: Pronto per le Videochiamate!",
     };
-    draw_text_left(hdc, x0 + 20, y0 + 8, w_box - 40, 36, step_title, rgb(255, 255, 255), f_title);
+    draw_text_left(
+        hdc,
+        x0 + 20,
+        y0 + 8,
+        w_box - 40,
+        36,
+        step_title,
+        rgb(255, 255, 255),
+        f_title,
+    );
 
     match app.wizard_step {
         1 => {
@@ -5794,7 +6207,8 @@ unsafe fn paint_wizard_overlay(
                 RECT::new(x0 + 28, y0 + 112, x0 + 28 + bw, y0 + 168),
                 "💧 Sfoca il mio Sfondo (Consigliato)",
                 UiAction::WizardSelectEffect(1),
-                app.cfg.segmentation.mode == "ai_selfie" && app.cfg.compositor.background_mode == "blur",
+                app.cfg.segmentation.mode == "ai_selfie"
+                    && app.cfg.compositor.background_mode == "blur",
                 rgb(2, 132, 199),
                 f_btn,
             );
@@ -5804,7 +6218,8 @@ unsafe fn paint_wizard_overlay(
                 RECT::new(x0 + 48 + bw, y0 + 112, x0 + w_box - 28, y0 + 168),
                 "🤖 Sfondo Ufficio AI (Foto / Preset)",
                 UiAction::WizardSelectEffect(2),
-                app.cfg.segmentation.mode == "ai_selfie" && app.cfg.compositor.background_mode != "blur",
+                app.cfg.segmentation.mode == "ai_selfie"
+                    && app.cfg.compositor.background_mode != "blur",
                 rgb(2, 132, 199),
                 f_btn,
             );
@@ -5897,7 +6312,12 @@ unsafe fn paint_wizard_overlay(
         register_button(
             hdc,
             app,
-            RECT::new(x0 + w_box - 330, y0 + h_box - 56, x0 + w_box - 190, y0 + h_box - 16),
+            RECT::new(
+                x0 + w_box - 330,
+                y0 + h_box - 56,
+                x0 + w_box - 190,
+                y0 + h_box - 16,
+            ),
             "◀ Indietro",
             UiAction::WizardPrev,
             false,
@@ -5908,7 +6328,12 @@ unsafe fn paint_wizard_overlay(
     register_button(
         hdc,
         app,
-        RECT::new(x0 + w_box - 178, y0 + h_box - 56, x0 + w_box - 28, y0 + h_box - 16),
+        RECT::new(
+            x0 + w_box - 178,
+            y0 + h_box - 56,
+            x0 + w_box - 28,
+            y0 + h_box - 16,
+        ),
         if app.wizard_step < 3 {
             "Avanti ▶"
         } else {
@@ -6044,10 +6469,19 @@ unsafe extern "system" fn main_wnd_proc(
                 SetCursor(LoadCursorW(NULL, IDC_ARROW));
             }
 
-            let old_hit = app.hit_zones.iter().position(|z| z.rect.contains(old_pos.x, old_pos.y));
+            let old_hit = app
+                .hit_zones
+                .iter()
+                .position(|z| z.rect.contains(old_pos.x, old_pos.y));
             let new_hit = app.hit_zones.iter().position(|z| z.rect.contains(x, y));
-            let old_dd = app.dropdown_overlay_zones.iter().position(|z| z.rect.contains(old_pos.x, old_pos.y));
-            let new_dd = app.dropdown_overlay_zones.iter().position(|z| z.rect.contains(x, y));
+            let old_dd = app
+                .dropdown_overlay_zones
+                .iter()
+                .position(|z| z.rect.contains(old_pos.x, old_pos.y));
+            let new_dd = app
+                .dropdown_overlay_zones
+                .iter()
+                .position(|z| z.rect.contains(x, y));
             if old_hit != new_hit || old_dd != new_dd {
                 InvalidateRect(hwnd, std::ptr::null(), FALSE);
             }
@@ -6448,7 +6882,9 @@ unsafe extern "system" fn single_instance_alert_wnd_proc(
             );
 
             st.btn_use_existing_rect = RECT::new(22, h - 66, w / 2 - 8, h - 18);
-            let hov1 = st.btn_use_existing_rect.contains(st.hover_pos.x, st.hover_pos.y);
+            let hov1 = st
+                .btn_use_existing_rect
+                .contains(st.hover_pos.x, st.hover_pos.y);
             draw_button(
                 mem_dc,
                 st.btn_use_existing_rect,
@@ -6460,7 +6896,9 @@ unsafe extern "system" fn single_instance_alert_wnd_proc(
             );
 
             st.btn_kill_all_rect = RECT::new(w / 2 + 8, h - 66, w - 22, h - 18);
-            let hov2 = st.btn_kill_all_rect.contains(st.hover_pos.x, st.hover_pos.y);
+            let hov2 = st
+                .btn_kill_all_rect
+                .contains(st.hover_pos.x, st.hover_pos.y);
             draw_button(
                 mem_dc,
                 st.btn_kill_all_rect,

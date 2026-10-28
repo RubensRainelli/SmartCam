@@ -20,6 +20,9 @@ description = "SmartCam v2.0 — Pure Rust Native Desktop Application & Media Fo
 license.workspace = true
 publish = false
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "SmartCam"
 path = "src/main.rs"

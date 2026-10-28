@@ -48,7 +48,15 @@ pub fn autocalibrate_greenscreen_direct(
     sample_y: i32,
 ) -> (u8, u8, u8, u8) {
     let mut segmenter = GreenScreenSegmenter::new(GreenScreenConfig::default());
-    segmenter.autocalibrate_greenscreen(input_frame, width, height, stride, is_bgra, sample_x, sample_y)
+    segmenter.autocalibrate_greenscreen(
+        input_frame,
+        width,
+        height,
+        stride,
+        is_bgra,
+        sample_x,
+        sample_y,
+    )
 }
 
 /// Supported pixel formats across the SmartCam pipeline.
@@ -301,7 +309,8 @@ impl SmartCamEngine {
         height: u32,
         pts: [(f32, f32); 5],
     ) -> (f32, f32, f32, f32) {
-        self.ai_segmenter.calibrate_face_landmarks(snapshot, width, height, pts)
+        self.ai_segmenter
+            .calibrate_face_landmarks(snapshot, width, height, pts)
     }
 
     pub fn set_face_calibration_profile(
@@ -345,7 +354,8 @@ impl SmartCamEngine {
     }
 
     pub fn set_reference_background(&mut self, bg: &[u8], width: u32, height: u32) -> bool {
-        self.ai_segmenter.set_reference_background(bg, width, height)
+        self.ai_segmenter
+            .set_reference_background(bg, width, height)
     }
 
     pub fn clear_reference_background(&mut self) {
@@ -450,7 +460,8 @@ impl SmartCamEngine {
         height: u32,
         ai_enabled: bool,
     ) -> BackendBenchmarkResult {
-        self.gpu_accel.get_recommended_profile(width, height, ai_enabled)
+        self.gpu_accel
+            .get_recommended_profile(width, height, ai_enabled)
     }
 }
 
@@ -479,7 +490,16 @@ mod tests {
 
         let mut out_scalar = vec![0u8; total_bytes];
         let ok_scalar = compositor::blend_bgra_scalar(
-            &fg, &bg, &mask, &mut out_scalar, w, h, w * 4, w * 4, w, w * 4,
+            &fg,
+            &bg,
+            &mask,
+            &mut out_scalar,
+            w,
+            h,
+            w * 4,
+            w * 4,
+            w,
+            w * 4,
         );
         assert!(ok_scalar);
 
@@ -489,7 +509,16 @@ mod tests {
                 let mut out_avx2 = vec![0u8; total_bytes];
                 let ok_avx2 = unsafe {
                     compositor::blend_bgra_avx2(
-                        &fg, &bg, &mask, &mut out_avx2, w, h, w * 4, w * 4, w, w * 4,
+                        &fg,
+                        &bg,
+                        &mask,
+                        &mut out_avx2,
+                        w,
+                        h,
+                        w * 4,
+                        w * 4,
+                        w,
+                        w * 4,
                     )
                 };
                 assert!(ok_avx2);
@@ -505,7 +534,16 @@ mod tests {
                 let mut out_avx512 = vec![0u8; total_bytes];
                 let ok_avx512 = unsafe {
                     compositor::blend_bgra_avx512(
-                        &fg, &bg, &mask, &mut out_avx512, w, h, w * 4, w * 4, w, w * 4,
+                        &fg,
+                        &bg,
+                        &mask,
+                        &mut out_avx512,
+                        w,
+                        h,
+                        w * 4,
+                        w * 4,
+                        w,
+                        w * 4,
                     )
                 };
                 assert!(ok_avx512);
@@ -577,9 +615,8 @@ mod tests {
         let src: Vec<u8> = (0..total).map(|i| (i * 3 + 25) as u8).collect();
 
         let mut dst_scalar = vec![0u8; total];
-        let ok_scalar = compositor::generate_blurred_bg_scalar(
-            &src, &mut dst_scalar, w, h, w * 4, 8,
-        );
+        let ok_scalar =
+            compositor::generate_blurred_bg_scalar(&src, &mut dst_scalar, w, h, w * 4, 8);
         assert!(ok_scalar);
 
         #[cfg(target_arch = "x86_64")]
@@ -587,9 +624,7 @@ mod tests {
             if std::arch::is_x86_feature_detected!("avx2") {
                 let mut dst_avx2 = vec![0u8; total];
                 let ok_avx2 = unsafe {
-                    compositor::generate_blurred_bg_avx2(
-                        &src, &mut dst_avx2, w, h, w * 4, 8,
-                    )
+                    compositor::generate_blurred_bg_avx2(&src, &mut dst_avx2, w, h, w * 4, 8)
                 };
                 assert!(ok_avx2);
                 assert_eq!(
@@ -606,16 +641,23 @@ mod tests {
         let total = (w * h * 4) as usize;
         let mut input = vec![0u8; total];
         for i in (0..total).step_by(4) {
-            input[i + 0] = 30;  // B
+            input[i + 0] = 30; // B
             input[i + 1] = 210; // G
-            input[i + 2] = 30;  // R
+            input[i + 2] = 30; // R
             input[i + 3] = 255;
         }
 
         let cfg = GreenScreenConfig::default();
         let mut mask_scalar = vec![0u8; (w * h) as usize];
         let ok_scalar = green_screen::compute_greenscreen_mask_scalar(
-            &input, w, h, w * 4, &mut mask_scalar, w, true, &cfg,
+            &input,
+            w,
+            h,
+            w * 4,
+            &mut mask_scalar,
+            w,
+            true,
+            &cfg,
         );
         assert!(ok_scalar);
 
@@ -625,7 +667,14 @@ mod tests {
                 let mut mask_avx2 = vec![0u8; (w * h) as usize];
                 let ok_avx2 = unsafe {
                     green_screen::compute_greenscreen_mask_avx2(
-                        &input, w, h, w * 4, &mut mask_avx2, w, true, &cfg,
+                        &input,
+                        w,
+                        h,
+                        w * 4,
+                        &mut mask_avx2,
+                        w,
+                        true,
+                        &cfg,
                     )
                 };
                 assert!(ok_avx2);

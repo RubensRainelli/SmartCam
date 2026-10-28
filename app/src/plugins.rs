@@ -422,8 +422,8 @@ pub fn generate_phone_tls_material() -> Option<PhoneTlsMaterial> {
             ip_sans.push(lan_ip);
         }
     }
-    if let Some(direct_ip) = detect_direct_hotspot_or_usb_ip()
-        .and_then(|s| s.parse::<IpAddr>().ok())
+    if let Some(direct_ip) =
+        detect_direct_hotspot_or_usb_ip().and_then(|s| s.parse::<IpAddr>().ok())
     {
         if !ip_sans.contains(&direct_ip) {
             ip_sans.push(direct_ip);
@@ -457,7 +457,9 @@ pub fn generate_phone_tls_material() -> Option<PhoneTlsMaterial> {
 /// Returns the cached in-process `PhoneTlsMaterial` (`rcgen` + `rustls`), initializing it once on first use.
 pub fn get_or_init_phone_tls_material() -> Option<&'static PhoneTlsMaterial> {
     static TLS_MATERIAL: OnceLock<Option<PhoneTlsMaterial>> = OnceLock::new();
-    TLS_MATERIAL.get_or_init(generate_phone_tls_material).as_ref()
+    TLS_MATERIAL
+        .get_or_init(generate_phone_tls_material)
+        .as_ref()
 }
 
 struct PhoneFrameSharedState {
@@ -620,7 +622,11 @@ impl PhoneCameraServer {
         let frames_tls = Arc::clone(&self.received_frames);
         let log_tls = Arc::clone(&self.last_client_log);
         let shared_tls = Arc::clone(&self.shared_frame);
-        let tls_port = if port <= 64000 { port + 1000 } else { port - 1000 };
+        let tls_port = if port <= 64000 {
+            port + 1000
+        } else {
+            port - 1000
+        };
         let tls_bind_addr = format!("127.0.0.1:{}", tls_port);
         let mut bound_tls_listener: Option<TcpListener> = None;
         for _ in 0..8 {
@@ -662,7 +668,11 @@ impl PhoneCameraServer {
                 &SocketAddr::from(([127, 0, 0, 1], port)),
                 Duration::from_millis(30),
             );
-            let tls_port = if port <= 64000 { port + 1000 } else { port - 1000 };
+            let tls_port = if port <= 64000 {
+                port + 1000
+            } else {
+                port - 1000
+            };
             let _ = TcpStream::connect_timeout(
                 &SocketAddr::from(([127, 0, 0, 1], tls_port)),
                 Duration::from_millis(30),
@@ -1163,8 +1173,9 @@ fn run_external_phone_pull_worker(
 
         if let Some((host, port, path)) = parse_http_endpoint(&target_url) {
             // Do not pull from our own local server port
-            let is_self = (host == local_ip || host == "127.0.0.1" || host.eq_ignore_ascii_case("localhost"))
-                && port == local_server_port;
+            let is_self =
+                (host == local_ip || host == "127.0.0.1" || host.eq_ignore_ascii_case("localhost"))
+                    && port == local_server_port;
             let is_default_placeholder = host == "192.168.1.100" && port == 8080;
 
             if !is_self && !is_default_placeholder {
@@ -1327,7 +1338,8 @@ fn bridge_tls_connection_to_loopback(
     tls_loopback_port: u16,
 ) {
     let target = SocketAddr::from(([127, 0, 0, 1], tls_loopback_port));
-    let Ok(mut tls_stream) = TcpStream::connect_timeout(&target, Duration::from_millis(1200)) else {
+    let Ok(mut tls_stream) = TcpStream::connect_timeout(&target, Duration::from_millis(1200))
+    else {
         return;
     };
     let _ = tls_stream.set_nodelay(true);
@@ -2407,7 +2419,9 @@ impl PluginRegistry {
         let shared_frame = Arc::new(Mutex::new(PhoneFrameSharedState::default()));
         let received_frames = Arc::new(AtomicU64::new(0));
         let tcp_connections = Arc::new(AtomicU64::new(0));
-        let last_client_log = Arc::new(Mutex::new("In attesa di pacchetti dal telefono...".to_string()));
+        let last_client_log = Arc::new(Mutex::new(
+            "In attesa di pacchetti dal telefono...".to_string(),
+        ));
         let remote_pull_url = Arc::new(Mutex::new(String::new()));
 
         let mut registry = Self {
@@ -2499,7 +2513,11 @@ impl PluginRegistry {
 
     /// Returns the full HTTP URL (`http://<LAN_IP>:<PORT>`) to open on the smartphone browser.
     pub fn phone_server_url(&self) -> String {
-        format!("http://{}:{}", self.local_lan_ip(), self.phone_server_port())
+        format!(
+            "http://{}:{}",
+            self.local_lan_ip(),
+            self.phone_server_port()
+        )
     }
 
     /// Returns `true` if the built-in Smartphone HTTP Server is actively listening on `phone_server_port()`.
@@ -3123,7 +3141,10 @@ impl PluginRegistry {
         // Sync phone_camera_source endpoint port if pointing to local LAN IP
         let current_lan_url = format!("http://{}:{}", lan_ip, self.phone_port);
         for p in &mut self.plugins {
-            if p.id == PLUGIN_ID_PHONE_CAMERA && p.config_endpoint.starts_with(&format!("http://{}:", lan_ip)) {
+            if p.id == PLUGIN_ID_PHONE_CAMERA
+                && p.config_endpoint
+                    .starts_with(&format!("http://{}:", lan_ip))
+            {
                 p.config_endpoint = current_lan_url.clone();
             }
         }
@@ -3379,14 +3400,7 @@ impl PluginRegistry {
 // Image Scaling & Crisp 5x7 Bitmap Font Renderer for Video Overlays
 // ============================================================================
 
-fn scale_bgra_nearest(
-    src: &[u8],
-    src_w: u32,
-    src_h: u32,
-    dst: &mut [u8],
-    dst_w: u32,
-    dst_h: u32,
-) {
+fn scale_bgra_nearest(src: &[u8], src_w: u32, src_h: u32, dst: &mut [u8], dst_w: u32, dst_h: u32) {
     if src_w == 0 || src_h == 0 || dst_w == 0 || dst_h == 0 {
         return;
     }
@@ -3415,47 +3429,129 @@ fn scale_bgra_nearest(
 /// Returns a 5x7 bitmap glyph (7 rows of 5-bit masks) for uppercase ASCII characters, digits, and URL punctuation.
 fn glyph_5x7(ch: char) -> [u8; 7] {
     match ch.to_ascii_uppercase() {
-        'A' => [0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
-        'B' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110],
-        'C' => [0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110],
-        'D' => [0b11100, 0b10010, 0b10001, 0b10001, 0b10001, 0b10010, 0b11100],
-        'E' => [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111],
-        'F' => [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000],
-        'G' => [0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01110],
-        'H' => [0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
-        'I' => [0b01110, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
-        'J' => [0b00111, 0b00010, 0b00010, 0b00010, 0b10010, 0b10010, 0b01100],
-        'K' => [0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001],
-        'L' => [0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111],
-        'M' => [0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001],
-        'N' => [0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001],
-        'O' => [0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
-        'P' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000],
-        'Q' => [0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101],
-        'R' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001],
-        'S' => [0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b11110],
-        'T' => [0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100],
-        'U' => [0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
-        'V' => [0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100],
-        'W' => [0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b11011, 0b10001],
-        'X' => [0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001],
-        'Y' => [0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100],
-        'Z' => [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111],
-        '0' => [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],
-        '1' => [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
-        '2' => [0b01110, 0b10001, 0b00001, 0b00110, 0b01000, 0b10000, 0b11111],
-        '3' => [0b11110, 0b00001, 0b00001, 0b01110, 0b00001, 0b00001, 0b11110],
-        '4' => [0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010],
-        '5' => [0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110],
-        '6' => [0b01110, 0b10000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110],
-        '7' => [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000],
-        '8' => [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110],
-        '9' => [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00001, 0b01110],
-        ':' => [0b00000, 0b00100, 0b00100, 0b00000, 0b00100, 0b00100, 0b00000],
-        '.' => [0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b01100, 0b01100],
-        '/' => [0b00001, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b10000],
-        '-' => [0b00000, 0b00000, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000],
-        '_' => [0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b11111],
+        'A' => [
+            0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+        ],
+        'B' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110,
+        ],
+        'C' => [
+            0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110,
+        ],
+        'D' => [
+            0b11100, 0b10010, 0b10001, 0b10001, 0b10001, 0b10010, 0b11100,
+        ],
+        'E' => [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111,
+        ],
+        'F' => [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000,
+        ],
+        'G' => [
+            0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01110,
+        ],
+        'H' => [
+            0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+        ],
+        'I' => [
+            0b01110, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+        ],
+        'J' => [
+            0b00111, 0b00010, 0b00010, 0b00010, 0b10010, 0b10010, 0b01100,
+        ],
+        'K' => [
+            0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001,
+        ],
+        'L' => [
+            0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111,
+        ],
+        'M' => [
+            0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001,
+        ],
+        'N' => [
+            0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001,
+        ],
+        'O' => [
+            0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+        ],
+        'P' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000,
+        ],
+        'Q' => [
+            0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101,
+        ],
+        'R' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001,
+        ],
+        'S' => [
+            0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b11110,
+        ],
+        'T' => [
+            0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100,
+        ],
+        'U' => [
+            0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+        ],
+        'V' => [
+            0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100,
+        ],
+        'W' => [
+            0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b11011, 0b10001,
+        ],
+        'X' => [
+            0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001,
+        ],
+        'Y' => [
+            0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100,
+        ],
+        'Z' => [
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111,
+        ],
+        '0' => [
+            0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
+        ],
+        '1' => [
+            0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+        ],
+        '2' => [
+            0b01110, 0b10001, 0b00001, 0b00110, 0b01000, 0b10000, 0b11111,
+        ],
+        '3' => [
+            0b11110, 0b00001, 0b00001, 0b01110, 0b00001, 0b00001, 0b11110,
+        ],
+        '4' => [
+            0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
+        ],
+        '5' => [
+            0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
+        ],
+        '6' => [
+            0b01110, 0b10000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
+        ],
+        '7' => [
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
+        ],
+        '8' => [
+            0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
+        ],
+        '9' => [
+            0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00001, 0b01110,
+        ],
+        ':' => [
+            0b00000, 0b00100, 0b00100, 0b00000, 0b00100, 0b00100, 0b00000,
+        ],
+        '.' => [
+            0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b01100, 0b01100,
+        ],
+        '/' => [
+            0b00001, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b10000,
+        ],
+        '-' => [
+            0b00000, 0b00000, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000,
+        ],
+        '_' => [
+            0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b11111,
+        ],
         _ => [0b00000; 7],
     }
 }
@@ -3556,8 +3652,12 @@ fn render_smartphone_pairing_frame_bgra(
     let card_x = (width.saturating_sub(card_w)) / 2;
     let card_y = (height.saturating_sub(card_h)) / 2;
 
-    fill_rect_bgra(out_bgra, width, height, card_x, card_y, card_w, card_h, 42, 28, 16);
-    border_rect_bgra(out_bgra, width, height, card_x, card_y, card_w, card_h, 3, 240, 195, 45);
+    fill_rect_bgra(
+        out_bgra, width, height, card_x, card_y, card_w, card_h, 42, 28, 16,
+    );
+    border_rect_bgra(
+        out_bgra, width, height, card_x, card_y, card_w, card_h, 3, 240, 195, 45,
+    );
 
     let center_x = card_x + card_w / 2;
     let base_scale = if width >= 960 {
@@ -3576,16 +3676,7 @@ fn render_smartphone_pairing_frame_bgra(
     let y4 = bar_y + 28;
 
     draw_centered_text_bgra(
-        out_bgra,
-        width,
-        height,
-        center_x,
-        y1,
-        title_line,
-        base_scale,
-        90,
-        220,
-        255,
+        out_bgra, width, height, center_x, y1, title_line, base_scale, 90, 220, 255,
     );
     draw_centered_text_bgra(
         out_bgra,
@@ -3630,16 +3721,7 @@ fn render_smartphone_pairing_frame_bgra(
         90,
     );
     draw_centered_text_bgra(
-        out_bgra,
-        width,
-        height,
-        center_x,
-        y3,
-        url_line,
-        url_scale,
-        120,
-        255,
-        110,
+        out_bgra, width, height, center_x, y3, url_line, url_scale, 120, 255, 110,
     );
 
     // Animated radar scan bar
@@ -3694,7 +3776,9 @@ fn render_smartphone_pairing_frame_bgra(
         if card_w >= qr_box_px + 220 && card_h >= qr_box_px + 20 {
             let qx = (card_x + card_w).saturating_sub(qr_box_px + 14);
             let qy = (card_y + card_h).saturating_sub(qr_box_px + 12);
-            fill_rect_bgra(out_bgra, width, height, qx, qy, qr_box_px, qr_box_px, 255, 255, 255);
+            fill_rect_bgra(
+                out_bgra, width, height, qx, qy, qr_box_px, qr_box_px, 255, 255, 255,
+            );
             for r in 0..qr_n {
                 for c in 0..qr_n {
                     if qr_mods[r * qr_n + c] {
@@ -3787,7 +3871,11 @@ pub fn generate_qr_code_matrix(text: &str) -> (usize, Vec<bool>) {
     };
 
     // Finder patterns (7x7) + separators at (0,0), (0, size-7), (size-7, 0)
-    let finder_origins = [(0isize, 0isize), (0isize, (size - 7) as isize), ((size - 7) as isize, 0isize)];
+    let finder_origins = [
+        (0isize, 0isize),
+        (0isize, (size - 7) as isize),
+        ((size - 7) as isize, 0isize),
+    ];
     for &(fr, fc) in &finder_origins {
         for dr in -1isize..=7 {
             for dc in -1isize..=7 {
@@ -3996,12 +4084,7 @@ fn border_rect_bgra(
 
 /// Detects secondary faces and upper-body silhouettes across all horizontal zones of the frame
 /// (up to 4 simultaneous people) and reinforces their foreground segmentation mask (`inout_mask`).
-fn apply_multi_person_mask_refinement(
-    bgra: &[u8],
-    inout_mask: &mut [u8],
-    width: u32,
-    height: u32,
-) {
+fn apply_multi_person_mask_refinement(bgra: &[u8], inout_mask: &mut [u8], width: u32, height: u32) {
     if width < 32 || height < 32 {
         return;
     }
@@ -4083,7 +4166,8 @@ fn apply_multi_person_mask_refinement(
                         };
                         let idx = row_px + x;
                         if boost > inout_mask[idx] {
-                            inout_mask[idx] = ((inout_mask[idx] as u16 + boost as u16 * 2) / 3) as u8;
+                            inout_mask[idx] =
+                                ((inout_mask[idx] as u16 + boost as u16 * 2) / 3) as u8;
                         }
                     }
                 }
@@ -4143,10 +4227,10 @@ fn apply_studio_color_enhancer_bgra(inout_bgra: &mut [u8], width: u32, height: u
         let contrast_gain = if is_skin { 104 } else { 109 };
 
         let r_out = (((r + exposure_lift - 128) * contrast_gain) / 100 + 133).clamp(0, 255) as u8;
-        let g_out = (((g + exposure_lift - 128) * (contrast_gain - 2)) / 100 + 129)
-            .clamp(0, 255) as u8;
-        let b_out = (((b + exposure_lift - 128) * (contrast_gain - 5)) / 100 + 124)
-            .clamp(0, 255) as u8;
+        let g_out =
+            (((g + exposure_lift - 128) * (contrast_gain - 2)) / 100 + 129).clamp(0, 255) as u8;
+        let b_out =
+            (((b + exposure_lift - 128) * (contrast_gain - 5)) / 100 + 124).clamp(0, 255) as u8;
 
         inout_bgra[idx] = b_out;
         inout_bgra[idx + 1] = g_out;
@@ -4217,16 +4301,7 @@ fn apply_teleprompter_overlay_bgra(
     let marker_x = (width.saturating_sub(marker_w)) / 2;
     let marker_y = bar_h.saturating_sub(4);
     fill_rect_bgra(
-        inout_bgra,
-        width,
-        height,
-        marker_x,
-        marker_y,
-        marker_w,
-        3,
-        60,
-        215,
-        255,
+        inout_bgra, width, height, marker_x, marker_y, marker_w, 3, 60, 215, 255,
     );
 }
 
@@ -4354,8 +4429,8 @@ mod tests {
             let server_name = ServerName::try_from("localhost").expect("valid DNS ServerName");
             let client_conn =
                 ClientConnection::new(Arc::clone(&client_config), server_name).unwrap();
-            let tcp = TcpStream::connect(("127.0.0.1", test_port))
-                .expect("connect to multiplexed port");
+            let tcp =
+                TcpStream::connect(("127.0.0.1", test_port)).expect("connect to multiplexed port");
             tcp.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
             tcp.set_write_timeout(Some(Duration::from_secs(3))).unwrap();
 
@@ -4364,7 +4439,9 @@ mod tests {
                 "GET /status HTTP/1.1\r\nHost: localhost:{}\r\nConnection: close\r\n\r\n",
                 test_port
             );
-            tls_stream.write_all(req.as_bytes()).expect("HTTPS write GET /status");
+            tls_stream
+                .write_all(req.as_bytes())
+                .expect("HTTPS write GET /status");
             tls_stream.flush().unwrap();
 
             let mut resp_bytes = Vec::new();
@@ -4384,9 +4461,8 @@ mod tests {
 
         // 2. Test HTTPS POST /frame on the loopback TLS port (`127.0.0.1:<test_port + 1000>`) using IP SAN 127.0.0.1
         {
-            let ip_server_name = ServerName::IpAddress(
-                rustls::pki_types::IpAddr::try_from("127.0.0.1").unwrap(),
-            );
+            let ip_server_name =
+                ServerName::IpAddress(rustls::pki_types::IpAddr::try_from("127.0.0.1").unwrap());
             let client_conn =
                 ClientConnection::new(Arc::clone(&client_config), ip_server_name).unwrap();
             let tcp = TcpStream::connect(("127.0.0.1", test_port + 1000))
@@ -4437,7 +4513,9 @@ mod tests {
         assert!(ep_usb.is_usb);
 
         // Test multipart MJPEG stream extraction with explicit Content-Length
-        let fake_jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, b'J', b'F', b'I', b'F', 0xFF, 0xD9];
+        let fake_jpeg = vec![
+            0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, b'J', b'F', b'I', b'F', 0xFF, 0xD9,
+        ];
         let mut mjpeg_stream = Vec::new();
         mjpeg_stream.extend_from_slice(
             format!(
@@ -4468,7 +4546,10 @@ mod tests {
         }
         let mut mask = vec![0u8; 64 * 64];
         apply_studio_color_enhancer_bgra(&mut bgra, 64, 64);
-        assert!(bgra[2] > 40, "low-light exposure lift must brighten dark frame");
+        assert!(
+            bgra[2] > 40,
+            "low-light exposure lift must brighten dark frame"
+        );
         apply_multi_person_mask_refinement(&bgra, &mut mask, 64, 64);
         apply_teleprompter_overlay_bgra(&mut bgra, 64, 64, "TEST TELEPROMPTER", 1);
         assert_eq!(bgra[3], 255);

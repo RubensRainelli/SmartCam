@@ -63,8 +63,14 @@ fn find_mf_source_dll(repo_root: &Path) -> PathBuf {
         }
     }
     let candidates = [
-        repo_root.join("target").join("release").join("smartcam_mf_source.dll"),
-        repo_root.join("target").join("debug").join("smartcam_mf_source.dll"),
+        repo_root
+            .join("target")
+            .join("release")
+            .join("smartcam_mf_source.dll"),
+        repo_root
+            .join("target")
+            .join("debug")
+            .join("smartcam_mf_source.dll"),
         repo_root.join("bin").join("smartcam_mf_source.dll"),
         repo_root.join("smartcam_mf_source.dll"),
     ];
@@ -359,11 +365,17 @@ fn register_virtual_camera_in_hive(root: HKEY, dll_path: &str) -> bool {
     ok1 && ok2 && ok3 && ok4
 }
 
-pub fn ensure_virtual_camera_registered(repo_root: &Path, preferred_variant: &str) -> Option<PathBuf> {
+pub fn ensure_virtual_camera_registered(
+    repo_root: &Path,
+    preferred_variant: &str,
+) -> Option<PathBuf> {
     let variants = detect_build_variants(repo_root);
     let mut chosen_dll: Option<PathBuf> = None;
 
-    if let Some(v) = variants.iter().find(|v| v.name == preferred_variant && v.has_mf_source) {
+    if let Some(v) = variants
+        .iter()
+        .find(|v| v.name == preferred_variant && v.has_mf_source)
+    {
         chosen_dll = Some(v.mf_source_dll.clone());
     }
     if chosen_dll.is_none() {
@@ -500,24 +512,35 @@ pub fn open_windows11_camera_privacy_settings() {
     unsafe {
         let op = to_wstring("open");
         let uri = to_wstring("ms-settings:privacy-webcam");
-        ShellExecuteW(NULL, op.as_ptr(), uri.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
+        ShellExecuteW(
+            NULL,
+            op.as_ptr(),
+            uri.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        );
     }
 }
 
 pub fn open_web_testbench(repo_root: &Path) -> String {
     let html_path = repo_root.join("app").join("web_preview").join("index.html");
     let url = if html_path.is_file() {
-        format!(
-            "file:///{}",
-            html_path.to_string_lossy().replace('\\', "/")
-        )
+        format!("file:///{}", html_path.to_string_lossy().replace('\\', "/"))
     } else {
         "http://localhost:8080".to_string()
     };
     unsafe {
         let op = to_wstring("open");
         let wurl = to_wstring(&url);
-        ShellExecuteW(NULL, op.as_ptr(), wurl.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
+        ShellExecuteW(
+            NULL,
+            op.as_ptr(),
+            wurl.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        );
     }
     url
 }
@@ -585,7 +608,11 @@ pub fn print_cli_status(diag: &SystemDiagnostics, cfg: &SmartCamConfig, as_json:
     println!("  * Media Foundation CLSID : {}", diag.clsid);
     println!(
         "  * Stato Registro Driver  : {}",
-        if diag.clsid_registered { "REGISTRATO (OK — 64-bit x86_64)" } else { "NON REGISTRATO" }
+        if diag.clsid_registered {
+            "REGISTRATO (OK — 64-bit x86_64)"
+        } else {
+            "NON REGISTRATO"
+        }
     );
     if !diag.registered_inproc_dll.is_empty() {
         println!(
@@ -593,7 +620,10 @@ pub fn print_cli_status(diag: &SystemDiagnostics, cfg: &SmartCamConfig, as_json:
             diag.registered_inproc_dll, diag.registered_dll_exists
         );
     }
-    println!("  * EnableFrameServerMode  : {:?}", diag.frameserver_enabled);
+    println!(
+        "  * EnableFrameServerMode  : {:?}",
+        diag.frameserver_enabled
+    );
     println!(
         "  * Shared Memory IPC      : {}",
         if diag.ipc_active {
@@ -608,7 +638,11 @@ pub fn print_cli_status(diag: &SystemDiagnostics, cfg: &SmartCamConfig, as_json:
     println!("------------------------------------------------------------------------");
     println!("  Varianti Motore C++ SIMD Compilate:");
     for b in &diag.build_variants {
-        let mark = if b.name == diag.active_build_variant { "*" } else { " " };
+        let mark = if b.name == diag.active_build_variant {
+            "*"
+        } else {
+            " "
+        };
         println!(
             "   [{}] {:10} : MF_Source={} | Engine_SIMD={} ({})",
             mark, b.name, b.has_mf_source, b.has_engine, b.label
@@ -651,9 +685,6 @@ pub fn print_cli_status(diag: &SystemDiagnostics, cfg: &SmartCamConfig, as_json:
         cfg.compositor.simd_acceleration,
         cfg.ai_enabled
     );
-    println!(
-        "    - Plugin Attivi    : {:?}",
-        cfg.enabled_plugins
-    );
+    println!("    - Plugin Attivi    : {:?}", cfg.enabled_plugins);
     println!("========================================================================");
 }

@@ -65,7 +65,11 @@ pub fn rgb_to_hsv_fast(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
 
     let hue = if cmax == r {
         let h = (30 * (g as i32 - b as i32)) / (delta as i32);
-        if h < 0 { h + 180 } else { h }
+        if h < 0 {
+            h + 180
+        } else {
+            h
+        }
     } else if cmax == g {
         60 + (30 * (b as i32 - r as i32)) / (delta as i32)
     } else {
@@ -280,7 +284,11 @@ impl GreenScreenSegmenter {
     ) -> bool {
         let w = width as usize;
         let h = height as usize;
-        if w == 0 || h == 0 || input_frame.len() < (stride_in as usize) * h || out_mask.len() < (stride_out as usize) * h {
+        if w == 0
+            || h == 0
+            || input_frame.len() < (stride_in as usize) * h
+            || out_mask.len() < (stride_out as usize) * h
+        {
             return false;
         }
 
@@ -376,7 +384,12 @@ impl GreenScreenSegmenter {
         let w = width as i32;
         let h = height as i32;
         if w <= 0 || h <= 0 || input_frame.is_empty() {
-            return (self.config.hue_min, self.config.hue_max, self.config.sat_min, self.config.val_min);
+            return (
+                self.config.hue_min,
+                self.config.hue_max,
+                self.config.sat_min,
+                self.config.val_min,
+            );
         }
 
         let mut h_samples = Vec::with_capacity(2048);
@@ -416,7 +429,12 @@ impl GreenScreenSegmenter {
 
         if sample_x >= 0 && sample_y >= 0 {
             let radius = 4.max((w.min(h)) / 32);
-            sample_rect(sample_x - radius, sample_y - radius, sample_x + radius, sample_y + radius);
+            sample_rect(
+                sample_x - radius,
+                sample_y - radius,
+                sample_x + radius,
+                sample_y + radius,
+            );
         } else {
             let margin_x = 1.max(w / 32);
             let margin_y = 1.max(h / 32);
@@ -424,11 +442,21 @@ impl GreenScreenSegmenter {
             let patch_h = 4.max(h / 5);
 
             sample_rect(margin_x, margin_y, margin_x + patch_w, margin_y + patch_h);
-            sample_rect(w - 1 - margin_x - patch_w, margin_y, w - 1 - margin_x, margin_y + patch_h);
+            sample_rect(
+                w - 1 - margin_x - patch_w,
+                margin_y,
+                w - 1 - margin_x,
+                margin_y + patch_h,
+            );
         }
 
         if h_samples.is_empty() {
-            return (self.config.hue_min, self.config.hue_max, self.config.sat_min, self.config.val_min);
+            return (
+                self.config.hue_min,
+                self.config.hue_max,
+                self.config.sat_min,
+                self.config.val_min,
+            );
         }
 
         h_samples.sort_unstable();
@@ -444,9 +472,21 @@ impl GreenScreenSegmenter {
         let mean_s = s_samples.iter().map(|&v| v as f64).sum::<f64>() / (n as f64);
         let mean_v = v_samples.iter().map(|&v| v as f64).sum::<f64>() / (n as f64);
 
-        let var_h = h_samples.iter().map(|&v| (v as f64 - mean_h).powi(2)).sum::<f64>() / (n as f64);
-        let var_s = s_samples.iter().map(|&v| (v as f64 - mean_s).powi(2)).sum::<f64>() / (n as f64);
-        let var_v = v_samples.iter().map(|&v| (v as f64 - mean_v).powi(2)).sum::<f64>() / (n as f64);
+        let var_h = h_samples
+            .iter()
+            .map(|&v| (v as f64 - mean_h).powi(2))
+            .sum::<f64>()
+            / (n as f64);
+        let var_s = s_samples
+            .iter()
+            .map(|&v| (v as f64 - mean_s).powi(2))
+            .sum::<f64>()
+            / (n as f64);
+        let var_v = v_samples
+            .iter()
+            .map(|&v| (v as f64 - mean_v).powi(2))
+            .sum::<f64>()
+            / (n as f64);
 
         let std_h = var_h.sqrt();
         let std_s = var_s.sqrt();
@@ -462,7 +502,8 @@ impl GreenScreenSegmenter {
         let v_tol = (3.0 * std_v + 20.0).max(45.0);
 
         let calc_h_min = ((p05_h - 8.0).min(med_h - h_tol).round() as i32).clamp(0, 180) as u8;
-        let calc_h_max = ((p95_h + 8.0).max(med_h + h_tol).round() as i32).clamp(calc_h_min as i32, 180) as u8;
+        let calc_h_max =
+            ((p95_h + 8.0).max(med_h + h_tol).round() as i32).clamp(calc_h_min as i32, 180) as u8;
         let calc_s_min = ((p05_s - 15.0).min(med_s - s_tol).round() as i32).clamp(10, 240) as u8;
         let calc_v_min = ((p05_v - 20.0).min(med_v - v_tol).round() as i32).clamp(15, 240) as u8;
 
@@ -583,7 +624,9 @@ impl GreenScreenSegmenter {
                 tmp_row[x] = (sum / diam) as u8;
                 let left_x = (x as i32 - r).max(0) as usize;
                 let right_x = (x as i32 + r + 1).min((w as i32) - 1) as usize;
-                sum = sum.wrapping_add(src_row[right_x] as u32).wrapping_sub(src_row[left_x] as u32);
+                sum = sum
+                    .wrapping_add(src_row[right_x] as u32)
+                    .wrapping_sub(src_row[left_x] as u32);
             }
         }
 
@@ -599,7 +642,8 @@ impl GreenScreenSegmenter {
                 mask[y * stride as usize + x] = (sum / diam) as u8;
                 let top_y = (y as i32 - r).max(0) as usize;
                 let bot_y = (y as i32 + r + 1).min((h as i32) - 1) as usize;
-                sum = sum.wrapping_add(self.scratch_a[bot_y * w + x] as u32)
+                sum = sum
+                    .wrapping_add(self.scratch_a[bot_y * w + x] as u32)
                     .wrapping_sub(self.scratch_a[top_y * w + x] as u32);
             }
         }

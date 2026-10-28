@@ -19,19 +19,17 @@ use windows::{
     Win32::{
         Foundation::{E_INVALIDARG, E_POINTER, S_OK},
         Media::MediaFoundation::{
-            IMFAsyncCallback, IMFAsyncResult, IMFAttributes, IMFGetService_Impl,
-            IMFMediaEvent, IMFMediaEventGenerator_Impl, IMFMediaEventQueue,
-            IMFMediaSourceEx, IMFMediaSourceEx_Impl,
-            IMFMediaSource_Impl, IMFMediaStream, IMFPresentationDescriptor,
-            MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS, MENewStream, MESourcePaused,
-            MESourceStarted, MESourceStopped, MFCreateAttributes, MFCreateEventQueue,
-            MFCreateMediaType, MFCreatePresentationDescriptor,
-            MFCreateStreamDescriptor, MFMEDIASOURCE_IS_LIVE, MFMediaType_Video,
-            MFVideoFormat_RGB32, MFVideoInterlace_Progressive, MF_E_SHUTDOWN,
-            MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_DEFAULT_STRIDE,
-            MF_MT_FIXED_SIZE_SAMPLES, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE,
-            MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_PIXEL_ASPECT_RATIO,
-            MF_MT_SAMPLE_SIZE, MF_MT_SUBTYPE,
+            IMFAsyncCallback, IMFAsyncResult, IMFAttributes, IMFGetService_Impl, IMFMediaEvent,
+            IMFMediaEventGenerator_Impl, IMFMediaEventQueue, IMFMediaSourceEx,
+            IMFMediaSourceEx_Impl, IMFMediaSource_Impl, IMFMediaStream, IMFPresentationDescriptor,
+            MENewStream, MESourcePaused, MESourceStarted, MESourceStopped, MFCreateAttributes,
+            MFCreateEventQueue, MFCreateMediaType, MFCreatePresentationDescriptor,
+            MFCreateStreamDescriptor, MFMediaType_Video, MFVideoFormat_RGB32,
+            MFVideoInterlace_Progressive, MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS,
+            MFMEDIASOURCE_IS_LIVE, MF_E_SHUTDOWN, MF_MT_ALL_SAMPLES_INDEPENDENT,
+            MF_MT_DEFAULT_STRIDE, MF_MT_FIXED_SIZE_SAMPLES, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE,
+            MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_PIXEL_ASPECT_RATIO, MF_MT_SAMPLE_SIZE,
+            MF_MT_SUBTYPE,
         },
     },
 };
@@ -39,8 +37,7 @@ use windows_core::{IUnknownImpl, PROPVARIANT};
 
 use crate::{
     constants::{
-        DEFAULT_STREAM_FPS, DEFAULT_STREAM_HEIGHT, DEFAULT_STREAM_WIDTH,
-        MF_VIDEO_FORMAT_ARGB64,
+        DEFAULT_STREAM_FPS, DEFAULT_STREAM_HEIGHT, DEFAULT_STREAM_WIDTH, MF_VIDEO_FORMAT_ARGB64,
     },
     stream::SmartCamMfMediaStream,
 };
@@ -62,10 +59,16 @@ struct SourceInner {
 }
 
 #[derive(Clone)]
-#[implement(IMFMediaSourceEx, windows::Win32::Media::MediaFoundation::IMFGetService)]
+#[implement(
+    IMFMediaSourceEx,
+    windows::Win32::Media::MediaFoundation::IMFGetService
+)]
 pub struct SmartCamMfMediaSource {
     inner: Arc<Mutex<SourceInner>>,
 }
+
+unsafe impl Send for SourceInner {}
+unsafe impl Sync for SourceInner {}
 
 impl SmartCamMfMediaSource {
     pub fn new() -> Result<Self> {
@@ -75,7 +78,8 @@ impl SmartCamMfMediaSource {
         unsafe {
             MFCreateAttributes(&mut source_attributes, 4)?;
         }
-        let source_attributes = source_attributes.ok_or_else(|| windows::core::Error::from_hresult(E_POINTER))?;
+        let source_attributes =
+            source_attributes.ok_or_else(|| windows::core::Error::from_hresult(E_POINTER))?;
 
         // 1. MediaType 0: 1440x1080 @ 30fps RGB32/BGRA32
         let media_type = unsafe { MFCreateMediaType()? };
@@ -83,13 +87,21 @@ impl SmartCamMfMediaSource {
             media_type.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)?;
             media_type.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_RGB32)?;
             media_type.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)?;
-            set_attribute_size(&media_type, &MF_MT_FRAME_SIZE, DEFAULT_STREAM_WIDTH, DEFAULT_STREAM_HEIGHT)?;
+            set_attribute_size(
+                &media_type,
+                &MF_MT_FRAME_SIZE,
+                DEFAULT_STREAM_WIDTH,
+                DEFAULT_STREAM_HEIGHT,
+            )?;
             set_attribute_ratio(&media_type, &MF_MT_FRAME_RATE, DEFAULT_STREAM_FPS, 1)?;
             set_attribute_ratio(&media_type, &MF_MT_PIXEL_ASPECT_RATIO, 1, 1)?;
             media_type.SetUINT32(&MF_MT_DEFAULT_STRIDE, DEFAULT_STREAM_WIDTH * 4)?;
             media_type.SetUINT32(&MF_MT_FIXED_SIZE_SAMPLES, 1)?;
             media_type.SetUINT32(&MF_MT_ALL_SAMPLES_INDEPENDENT, 1)?;
-            media_type.SetUINT32(&MF_MT_SAMPLE_SIZE, DEFAULT_STREAM_WIDTH * DEFAULT_STREAM_HEIGHT * 4)?;
+            media_type.SetUINT32(
+                &MF_MT_SAMPLE_SIZE,
+                DEFAULT_STREAM_WIDTH * DEFAULT_STREAM_HEIGHT * 4,
+            )?;
         }
 
         // 2. MediaType 1: 1440x1080 @ 30fps ARGB64 (Deep Color 16-bit per channel)
@@ -97,21 +109,27 @@ impl SmartCamMfMediaSource {
         unsafe {
             media_type_64.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)?;
             media_type_64.SetGUID(&MF_MT_SUBTYPE, &MF_VIDEO_FORMAT_ARGB64)?;
-            media_type_64.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)?;
-            set_attribute_size(&media_type_64, &MF_MT_FRAME_SIZE, DEFAULT_STREAM_WIDTH, DEFAULT_STREAM_HEIGHT)?;
+            media_type_64
+                .SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)?;
+            set_attribute_size(
+                &media_type_64,
+                &MF_MT_FRAME_SIZE,
+                DEFAULT_STREAM_WIDTH,
+                DEFAULT_STREAM_HEIGHT,
+            )?;
             set_attribute_ratio(&media_type_64, &MF_MT_FRAME_RATE, DEFAULT_STREAM_FPS, 1)?;
             set_attribute_ratio(&media_type_64, &MF_MT_PIXEL_ASPECT_RATIO, 1, 1)?;
             media_type_64.SetUINT32(&MF_MT_DEFAULT_STRIDE, DEFAULT_STREAM_WIDTH * 8)?;
             media_type_64.SetUINT32(&MF_MT_FIXED_SIZE_SAMPLES, 1)?;
             media_type_64.SetUINT32(&MF_MT_ALL_SAMPLES_INDEPENDENT, 1)?;
-            media_type_64.SetUINT32(&MF_MT_SAMPLE_SIZE, DEFAULT_STREAM_WIDTH * DEFAULT_STREAM_HEIGHT * 8)?;
+            media_type_64.SetUINT32(
+                &MF_MT_SAMPLE_SIZE,
+                DEFAULT_STREAM_WIDTH * DEFAULT_STREAM_HEIGHT * 8,
+            )?;
         }
 
         let stream_desc = unsafe {
-            MFCreateStreamDescriptor(
-                0,
-                &[Some(media_type.clone()), Some(media_type_64)],
-            )?
+            MFCreateStreamDescriptor(0, &[Some(media_type.clone()), Some(media_type_64)])?
         };
 
         let handler = unsafe { stream_desc.GetMediaTypeHandler()? };
@@ -119,9 +137,8 @@ impl SmartCamMfMediaSource {
             handler.SetCurrentMediaType(&media_type)?;
         }
 
-        let pres_descriptor = unsafe {
-            MFCreatePresentationDescriptor(Some(&[Some(stream_desc.clone())]))?
-        };
+        let pres_descriptor =
+            unsafe { MFCreatePresentationDescriptor(Some(&[Some(stream_desc.clone())]))? };
         unsafe {
             pres_descriptor.SelectStream(0)?;
         }
@@ -151,7 +168,7 @@ impl IMFMediaEventGenerator_Impl for SmartCamMfMediaSource_Impl {
             }
             inner.event_queue.clone()
         };
-        unsafe { queue.GetEvent(dwflags.0 as u32) }
+        unsafe { queue.GetEvent(dwflags.0) }
     }
 
     fn BeginGetEvent(
@@ -349,7 +366,10 @@ impl IMFGetService_Impl for SmartCamMfMediaSource_Impl {
             return Err(windows::core::Error::from_hresult(E_POINTER));
         }
         unsafe {
-            self.to_object().as_interface::<IUnknown>().query(riid, ppvobject).ok()
+            self.to_object()
+                .as_interface::<IUnknown>()
+                .query(riid, ppvobject)
+                .ok()
         }
     }
 }

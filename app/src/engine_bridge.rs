@@ -358,7 +358,8 @@ unsafe extern "C" fn pure_gs_mask(
     let mask_slice = std::slice::from_raw_parts_mut(mask, (h * stride_mask) as usize);
     if !handle.is_null() {
         let engine = &mut *(handle as *mut SmartCamEngine);
-        if engine.compute_greenscreen_mask(fg_slice, w, h, stride_fg, mask_slice, stride_mask, true) {
+        if engine.compute_greenscreen_mask(fg_slice, w, h, stride_fg, mask_slice, stride_mask, true)
+        {
             engine.suppress_green_spill(fg_slice, mask_slice, w, h, stride_fg, stride_mask, true);
             1
         } else {
@@ -366,7 +367,16 @@ unsafe extern "C" fn pure_gs_mask(
         }
     } else {
         let mut gs = smartcam_engine::GreenScreenSegmenter::new(GreenScreenConfig::default());
-        if gs.compute_mask(fg_slice, w, h, stride_fg, mask_slice, stride_mask, true, SimdTier::Auto) {
+        if gs.compute_mask(
+            fg_slice,
+            w,
+            h,
+            stride_fg,
+            mask_slice,
+            stride_mask,
+            true,
+            SimdTier::Auto,
+        ) {
             gs.suppress_green_spill(fg_slice, mask_slice, w, h, stride_fg, stride_mask, true);
             1
         } else {
@@ -391,14 +401,33 @@ unsafe extern "C" fn pure_ai_mask(
     let mask_slice = std::slice::from_raw_parts_mut(mask, (h * stride_mask) as usize);
     if !handle.is_null() {
         let engine = &mut *(handle as *mut SmartCamEngine);
-        if engine.compute_ai_mask(fg_slice, w, h, stride_fg, mask_slice, stride_mask, true, true) {
+        if engine.compute_ai_mask(
+            fg_slice,
+            w,
+            h,
+            stride_fg,
+            mask_slice,
+            stride_mask,
+            true,
+            true,
+        ) {
             1
         } else {
             0
         }
     } else {
-        let mut ai = smartcam_engine::AiOnnxSegmenter::new(smartcam_engine::AiSegmenterConfig::default());
-        if ai.compute_mask(fg_slice, w, h, stride_fg, mask_slice, stride_mask, true, true) {
+        let mut ai =
+            smartcam_engine::AiOnnxSegmenter::new(smartcam_engine::AiSegmenterConfig::default());
+        if ai.compute_mask(
+            fg_slice,
+            w,
+            h,
+            stride_fg,
+            mask_slice,
+            stride_mask,
+            true,
+            true,
+        ) {
             1
         } else {
             0
@@ -456,7 +485,13 @@ unsafe extern "C" fn pure_autocal_gs(
         engine.autocalibrate_greenscreen(frame_slice, w, h, stride, true, sample_x, sample_y)
     } else {
         smartcam_engine::autocalibrate_greenscreen_direct(
-            frame_slice, w, h, stride, true, sample_x, sample_y,
+            frame_slice,
+            w,
+            h,
+            stride,
+            true,
+            sample_x,
+            sample_y,
         )
     };
     if !out_hmin.is_null() {
@@ -559,7 +594,8 @@ unsafe extern "C" fn pure_calibrate_face_landmarks(
         let engine = &mut *(handle as *mut SmartCamEngine);
         engine.calibrate_face_landmarks(snap_slice, w, h, pts)
     } else {
-        let mut ai = smartcam_engine::AiOnnxSegmenter::new(smartcam_engine::AiSegmenterConfig::default());
+        let mut ai =
+            smartcam_engine::AiOnnxSegmenter::new(smartcam_engine::AiSegmenterConfig::default());
         ai.calibrate_face_landmarks(snap_slice, w, h, pts)
     };
     if !out_cb.is_null() {
@@ -819,18 +855,36 @@ impl NativeEngineLibrary {
             fn_set_silhouette_mode: Some(pure_set_silhouette_mode),
             fn_get_silhouette_mode: Some(pure_get_silhouette_mode),
             fn_set_multi_person_mode: Some(pure_set_multi_person_mode),
-            fn_cam_count: Some(smartcam_capture::windows_backend::c_api::smartcam_win_get_camera_count),
-            fn_cam_info: Some(smartcam_capture::windows_backend::c_api::smartcam_win_get_camera_info),
-            fn_cam_create: Some(smartcam_capture::windows_backend::c_api::smartcam_win_camera_create),
+            fn_cam_count: Some(
+                smartcam_capture::windows_backend::c_api::smartcam_win_get_camera_count,
+            ),
+            fn_cam_info: Some(
+                smartcam_capture::windows_backend::c_api::smartcam_win_get_camera_info,
+            ),
+            fn_cam_create: Some(
+                smartcam_capture::windows_backend::c_api::smartcam_win_camera_create,
+            ),
             fn_cam_open: Some(smartcam_capture::windows_backend::c_api::smartcam_win_camera_open),
-            fn_cam_read: Some(smartcam_capture::windows_backend::c_api::smartcam_win_camera_read_frame),
+            fn_cam_read: Some(
+                smartcam_capture::windows_backend::c_api::smartcam_win_camera_read_frame,
+            ),
             fn_cam_close: Some(smartcam_capture::windows_backend::c_api::smartcam_win_camera_close),
-            fn_cam_destroy: Some(smartcam_capture::windows_backend::c_api::smartcam_win_camera_destroy),
-            fn_sink_create: Some(smartcam_capture::windows_backend::c_api::smartcam_win_sink_create),
+            fn_cam_destroy: Some(
+                smartcam_capture::windows_backend::c_api::smartcam_win_camera_destroy,
+            ),
+            fn_sink_create: Some(
+                smartcam_capture::windows_backend::c_api::smartcam_win_sink_create,
+            ),
             fn_sink_init: Some(smartcam_capture::windows_backend::c_api::smartcam_win_sink_init),
-            fn_sink_push: Some(smartcam_capture::windows_backend::c_api::smartcam_win_sink_push_frame),
-            fn_sink_active: Some(smartcam_capture::windows_backend::c_api::smartcam_win_sink_is_consumer_active),
-            fn_sink_destroy: Some(smartcam_capture::windows_backend::c_api::smartcam_win_sink_destroy),
+            fn_sink_push: Some(
+                smartcam_capture::windows_backend::c_api::smartcam_win_sink_push_frame,
+            ),
+            fn_sink_active: Some(
+                smartcam_capture::windows_backend::c_api::smartcam_win_sink_is_consumer_active,
+            ),
+            fn_sink_destroy: Some(
+                smartcam_capture::windows_backend::c_api::smartcam_win_sink_destroy,
+            ),
         })
     }
 
@@ -925,15 +979,32 @@ impl SmartCamPipelineInstance {
             })
         };
 
-        let simd_backend_label = format!("Pure Rust Runtime SIMD ({})", engine.get_active_simd_name());
+        let simd_backend_label =
+            format!("Pure Rust Runtime SIMD ({})", engine.get_active_simd_name());
         let compute_backend_label = engine.get_active_compute_backend_name().to_string();
         let compute_device_label = engine.get_active_compute_device_name();
 
         let preset_defs = [
-            (1u8, "🏢 Studio Blu", "assets/backgrounds/preset_1_studio_blue.jpg"),
-            (2u8, "🪵 Ufficio Caldo", "assets/backgrounds/preset_2_warm_office.jpg"),
-            (3u8, "☀️ Loft Chiaro", "assets/backgrounds/preset_3_minimal_loft.jpg"),
-            (4u8, "🏛️ Executive Dark", "assets/backgrounds/preset_4_dark_executive.jpg"),
+            (
+                1u8,
+                "🏢 Studio Blu",
+                "assets/backgrounds/preset_1_studio_blue.jpg",
+            ),
+            (
+                2u8,
+                "🪵 Ufficio Caldo",
+                "assets/backgrounds/preset_2_warm_office.jpg",
+            ),
+            (
+                3u8,
+                "☀️ Loft Chiaro",
+                "assets/backgrounds/preset_3_minimal_loft.jpg",
+            ),
+            (
+                4u8,
+                "🏛️ Executive Dark",
+                "assets/backgrounds/preset_4_dark_executive.jpg",
+            ),
         ];
         let mut studio_preset_thumbs = Vec::with_capacity(4);
         for (pid, plbl, ppath) in preset_defs {
@@ -999,7 +1070,10 @@ impl SmartCamPipelineInstance {
         if !cfg.segmentation.ai_selfie.face_calibrated {
             return;
         }
-        let snap_path = self.repo_root.join("config").join("face_calib_snapshot.bin");
+        let snap_path = self
+            .repo_root
+            .join("config")
+            .join("face_calib_snapshot.bin");
         if let Ok(bytes) = std::fs::read(&snap_path) {
             if bytes.len() >= 8 {
                 let sw = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
@@ -1007,7 +1081,8 @@ impl SmartCamPipelineInstance {
                 let expected = 8usize + (sw as usize) * (sh as usize) * 4;
                 if sw >= 64 && sh >= 36 && sw <= 3840 && sh <= 2160 && bytes.len() >= expected {
                     let pts = cfg.segmentation.ai_selfie.calib_landmarks;
-                    self.engine.calibrate_face_landmarks(&bytes[8..expected], sw, sh, pts);
+                    self.engine
+                        .calibrate_face_landmarks(&bytes[8..expected], sw, sh, pts);
                 }
             }
         }
@@ -1034,7 +1109,8 @@ impl SmartCamPipelineInstance {
             4 => SimdTier::Neon,
             _ => SimdTier::Auto,
         };
-        self.engine.set_hardware_policy(backend, simd, cfg.ai_enabled);
+        self.engine
+            .set_hardware_policy(backend, simd, cfg.ai_enabled);
 
         let simd_s = self.engine.get_active_simd_name();
         let backend_s = self.engine.get_active_compute_backend_name();
@@ -1110,7 +1186,8 @@ impl SmartCamPipelineInstance {
             ai.calib_head_rx,
             ai.calib_head_ry,
         );
-        self.engine.set_silhouette_mode(ai.silhouette_mode.clamp(0, 1));
+        self.engine
+            .set_silhouette_mode(ai.silhouette_mode.clamp(0, 1));
         self.engine.set_multi_person_mode(multi_person_active);
     }
 
@@ -1139,11 +1216,15 @@ impl SmartCamPipelineInstance {
                 snap_file_bytes.extend_from_slice(&snapshot_bgra[off..off + 4]);
             }
         }
-        let snap_path = self.repo_root.join("config").join("face_calib_snapshot.bin");
+        let snap_path = self
+            .repo_root
+            .join("config")
+            .join("face_calib_snapshot.bin");
         let _ = std::fs::write(&snap_path, &snap_file_bytes);
 
         let (skin_cb, skin_cr, head_rx, head_ry) =
-            self.engine.calibrate_face_landmarks(snapshot_bgra, w, h, pts);
+            self.engine
+                .calibrate_face_landmarks(snapshot_bgra, w, h, pts);
 
         cfg.segmentation.ai_selfie.face_calibrated = true;
         cfg.segmentation.ai_selfie.calib_skin_cb = skin_cb.clamp(60.0, 175.0);
@@ -1169,7 +1250,9 @@ impl SmartCamPipelineInstance {
     pub fn init_sink(&mut self, cfg: &SmartCamConfig) {
         unsafe {
             if !self.sink_handle.is_null() {
-                smartcam_capture::windows_backend::c_api::smartcam_win_sink_destroy(self.sink_handle);
+                smartcam_capture::windows_backend::c_api::smartcam_win_sink_destroy(
+                    self.sink_handle,
+                );
                 self.sink_handle = std::ptr::null_mut();
             }
             let sh = smartcam_capture::windows_backend::c_api::smartcam_win_sink_create();
@@ -1190,16 +1273,11 @@ impl SmartCamPipelineInstance {
                 }
             }
         }
-        self.fallback_shm = FallbackSharedMemoryWriter::open(&cfg.virtual_camera.shared_memory_name);
+        self.fallback_shm =
+            FallbackSharedMemoryWriter::open(&cfg.virtual_camera.shared_memory_name);
     }
 
-    pub fn open_hardware_camera(
-        &mut self,
-        index: u32,
-        width: u32,
-        height: u32,
-        fps: u32,
-    ) -> bool {
+    pub fn open_hardware_camera(&mut self, index: u32, width: u32, height: u32, fps: u32) -> bool {
         self.close_hardware_camera();
         self.camera_busy_error = false;
         unsafe {
@@ -1226,8 +1304,12 @@ impl SmartCamPipelineInstance {
     pub fn close_hardware_camera(&mut self) {
         if !self.cam_handle.is_null() {
             unsafe {
-                smartcam_capture::windows_backend::c_api::smartcam_win_camera_close(self.cam_handle);
-                smartcam_capture::windows_backend::c_api::smartcam_win_camera_destroy(self.cam_handle);
+                smartcam_capture::windows_backend::c_api::smartcam_win_camera_close(
+                    self.cam_handle,
+                );
+                smartcam_capture::windows_backend::c_api::smartcam_win_camera_destroy(
+                    self.cam_handle,
+                );
             }
             self.cam_handle = std::ptr::null_mut();
         }
@@ -1381,9 +1463,15 @@ impl SmartCamPipelineInstance {
 
         let preset_id = if effective.contains("preset_2") || effective.contains("warm") {
             2
-        } else if effective.contains("preset_3") || effective.contains("minimal") || effective.contains("loft") {
+        } else if effective.contains("preset_3")
+            || effective.contains("minimal")
+            || effective.contains("loft")
+        {
             3
-        } else if effective.contains("preset_4") || effective.contains("dark") || effective.contains("executive") {
+        } else if effective.contains("preset_4")
+            || effective.contains("dark")
+            || effective.contains("executive")
+        {
             4
         } else {
             1
@@ -1408,7 +1496,8 @@ impl SmartCamPipelineInstance {
         mirror_v: bool,
     ) {
         if self.bg_source_image.is_empty() || self.bg_source_w == 0 || self.bg_source_h == 0 {
-            let _ = self.load_or_generate_background_image("assets/backgrounds/preset_1_studio_blue.jpg");
+            let _ = self
+                .load_or_generate_background_image("assets/backgrounds/preset_1_studio_blue.jpg");
         }
         let needed = (out_w * out_h * 4) as usize;
         if self.bg_cropped_cache.len() != needed {
@@ -1605,7 +1694,9 @@ impl Drop for SmartCamPipelineInstance {
         self.close_hardware_camera();
         if !self.sink_handle.is_null() {
             unsafe {
-                smartcam_capture::windows_backend::c_api::smartcam_win_sink_destroy(self.sink_handle);
+                smartcam_capture::windows_backend::c_api::smartcam_win_sink_destroy(
+                    self.sink_handle,
+                );
             }
             self.sink_handle = std::ptr::null_mut();
         }
@@ -1625,11 +1716,7 @@ impl Drop for SmartCamPipelineInstance {
 pub use smartcam_engine::crop_scaler::compute_social_crop_rect;
 pub use smartcam_engine::crop_scaler::crop_zoom_image_social;
 
-pub fn generate_studio_preset_bgra(
-    preset_id: u8,
-    width: u32,
-    height: u32,
-) -> (Vec<u8>, u32, u32) {
+pub fn generate_studio_preset_bgra(preset_id: u8, width: u32, height: u32) -> (Vec<u8>, u32, u32) {
     let mut buf = vec![255u8; (width * height * 4) as usize];
     for y in 0..height {
         let ny = (y as f32) / (height.max(1) as f32);
@@ -1654,27 +1741,69 @@ pub fn generate_studio_preset_bgra(
 
             let (r_base, g_base, b_base) = match preset_id {
                 2 => {
-                    let r = (76.0 + 95.0 * (1.0 - ny * 0.5) + 110.0 * window_panel + 40.0 * shelf_accent) * vignette;
-                    let g = (58.0 + 72.0 * (1.0 - ny * 0.5) + 92.0 * window_panel + 25.0 * shelf_accent) * vignette;
-                    let b = (44.0 + 50.0 * (1.0 - ny * 0.4) + 75.0 * window_panel + 12.0 * shelf_accent) * vignette;
+                    let r = (76.0
+                        + 95.0 * (1.0 - ny * 0.5)
+                        + 110.0 * window_panel
+                        + 40.0 * shelf_accent)
+                        * vignette;
+                    let g = (58.0
+                        + 72.0 * (1.0 - ny * 0.5)
+                        + 92.0 * window_panel
+                        + 25.0 * shelf_accent)
+                        * vignette;
+                    let b = (44.0
+                        + 50.0 * (1.0 - ny * 0.4)
+                        + 75.0 * window_panel
+                        + 12.0 * shelf_accent)
+                        * vignette;
                     (r, g, b)
                 }
                 3 => {
-                    let r = (135.0 + 75.0 * (1.0 - ny * 0.45) + 45.0 * window_panel - 20.0 * shelf_accent) * vignette;
-                    let g = (144.0 + 78.0 * (1.0 - ny * 0.45) + 48.0 * window_panel - 15.0 * shelf_accent) * vignette;
-                    let b = (154.0 + 82.0 * (1.0 - ny * 0.40) + 52.0 * window_panel - 10.0 * shelf_accent) * vignette;
+                    let r = (135.0 + 75.0 * (1.0 - ny * 0.45) + 45.0 * window_panel
+                        - 20.0 * shelf_accent)
+                        * vignette;
+                    let g = (144.0 + 78.0 * (1.0 - ny * 0.45) + 48.0 * window_panel
+                        - 15.0 * shelf_accent)
+                        * vignette;
+                    let b = (154.0 + 82.0 * (1.0 - ny * 0.40) + 52.0 * window_panel
+                        - 10.0 * shelf_accent)
+                        * vignette;
                     (r, g, b)
                 }
                 4 => {
-                    let r = (24.0 + 36.0 * (1.0 - ny * 0.6) + 64.0 * window_panel + 45.0 * shelf_accent) * vignette;
-                    let g = (30.0 + 44.0 * (1.0 - ny * 0.6) + 58.0 * window_panel + 32.0 * shelf_accent) * vignette;
-                    let b = (42.0 + 58.0 * (1.0 - ny * 0.5) + 52.0 * window_panel + 20.0 * shelf_accent) * vignette;
+                    let r = (24.0
+                        + 36.0 * (1.0 - ny * 0.6)
+                        + 64.0 * window_panel
+                        + 45.0 * shelf_accent)
+                        * vignette;
+                    let g = (30.0
+                        + 44.0 * (1.0 - ny * 0.6)
+                        + 58.0 * window_panel
+                        + 32.0 * shelf_accent)
+                        * vignette;
+                    let b = (42.0
+                        + 58.0 * (1.0 - ny * 0.5)
+                        + 52.0 * window_panel
+                        + 20.0 * shelf_accent)
+                        * vignette;
                     (r, g, b)
                 }
                 _ => {
-                    let r = (26.0 + 48.0 * (1.0 - ny * 0.5) + 65.0 * window_panel + 22.0 * shelf_accent) * vignette;
-                    let g = (54.0 + 86.0 * (1.0 - ny * 0.5) + 95.0 * window_panel + 38.0 * shelf_accent) * vignette;
-                    let b = (92.0 + 122.0 * (1.0 - ny * 0.4) + 115.0 * window_panel + 55.0 * shelf_accent) * vignette;
+                    let r = (26.0
+                        + 48.0 * (1.0 - ny * 0.5)
+                        + 65.0 * window_panel
+                        + 22.0 * shelf_accent)
+                        * vignette;
+                    let g = (54.0
+                        + 86.0 * (1.0 - ny * 0.5)
+                        + 95.0 * window_panel
+                        + 38.0 * shelf_accent)
+                        * vignette;
+                    let b = (92.0
+                        + 122.0 * (1.0 - ny * 0.4)
+                        + 115.0 * window_panel
+                        + 55.0 * shelf_accent)
+                        * vignette;
                     (r, g, b)
                 }
             };
@@ -1792,8 +1921,7 @@ impl FallbackSharedMemoryWriter {
             if hmap.is_null() {
                 return None;
             }
-            let view =
-                MapViewOfFile(hmap, FILE_MAP_ALL_ACCESS, 0, 0, Self::TOTAL_BYTES) as *mut u8;
+            let view = MapViewOfFile(hmap, FILE_MAP_ALL_ACCESS, 0, 0, Self::TOTAL_BYTES) as *mut u8;
             if view.is_null() {
                 CloseHandle(hmap);
                 return None;
@@ -1913,7 +2041,11 @@ mod tests {
 
             let payload =
                 std::slice::from_raw_parts(view.add(CPP_SHARED_FRAME_HEADER_BYTES), pixels.len());
-            assert_eq!(payload, &pixels[..], "pixels are not at sizeof(SharedFrameHeader)");
+            assert_eq!(
+                payload,
+                &pixels[..],
+                "pixels are not at sizeof(SharedFrameHeader)"
+            );
 
             UnmapViewOfFile(view as *const c_void);
             CloseHandle(hmap);
@@ -1932,7 +2064,10 @@ mod tests {
         );
         assert_eq!(std::mem::offset_of!(SharedFrameHeaderRaw, width), 16);
         assert_eq!(std::mem::offset_of!(SharedFrameHeaderRaw, pixel_format), 36);
-        assert_eq!(std::mem::offset_of!(SharedFrameHeaderRaw, timestamp_100ns), 40);
+        assert_eq!(
+            std::mem::offset_of!(SharedFrameHeaderRaw, timestamp_100ns),
+            40
+        );
         assert_eq!(std::mem::offset_of!(SharedFrameHeaderRaw, frame_index), 48);
     }
 }

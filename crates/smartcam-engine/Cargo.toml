@@ -11,6 +11,9 @@ license.workspace = true
 description = "SmartCam v2.0 Pure Rust Video Compositor, Runtime SIMD Dispatch, AI Segmentation & GPU Acceleration"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 
 [target.'cfg(windows)'.dependencies]

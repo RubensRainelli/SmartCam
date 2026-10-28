@@ -107,34 +107,34 @@ unsafe fn load_proc_local<T: Copy>(hmod: HMODULE, name: &[u8]) -> Option<T> {
 /// Describes a discovered compute backend (`CPU`, `Vulkan`, `OpenCL`, `CUDA`, `ROCm`).
 #[derive(Clone, Debug)]
 pub struct ProbedComputeDevice {
-    pub backend_id: u32,       // 1=CPU, 2=Vulkan, 3=OpenCL, 4=CUDA, 5=ROCm
-    pub backend_key: String,   // "cpu", "vulkan", "opencl", "cuda", "rocm"
-    pub backend_name: String,  // "CPU", "Vulkan", "OpenCL", "CUDA", "ROCm"
-    pub device_name: String,   // e.g. "Intel(R) Iris(R) Xe Graphics"
-    pub vram_mb: u64,          // Dedicated/shared VRAM in MB
-    pub available: bool,       // True if driver + hardware device are present on this PC
-    pub is_igpu: bool,         // True if integrated GPU / unified memory architecture
-    pub status_label: String,  // "Disponibile" or "Non presente su questo PC"
+    pub backend_id: u32,      // 1=CPU, 2=Vulkan, 3=OpenCL, 4=CUDA, 5=ROCm
+    pub backend_key: String,  // "cpu", "vulkan", "opencl", "cuda", "rocm"
+    pub backend_name: String, // "CPU", "Vulkan", "OpenCL", "CUDA", "ROCm"
+    pub device_name: String,  // e.g. "Intel(R) Iris(R) Xe Graphics"
+    pub vram_mb: u64,         // Dedicated/shared VRAM in MB
+    pub available: bool,      // True if driver + hardware device are present on this PC
+    pub is_igpu: bool,        // True if integrated GPU / unified memory architecture
+    pub status_label: String, // "Disponibile" or "Non presente su questo PC"
 }
 
 /// Performance & hardware availability metrics for a single benchmarked configuration.
 #[derive(Clone, Debug)]
 pub struct BenchmarkProfileEntry {
-    pub profile_id: String,            // e.g. "cpu_avx512_ai", "vulkan_ai"
-    pub label: String,                 // e.g. "CPU + AVX-512 + AI", "GPU Vulkan + AI"
-    pub compute_backend: String,       // "cpu", "vulkan", "opencl", "cuda", "rocm"
-    pub compute_backend_id: u32,       // 1=CPU, 2=Vulkan, 3=OpenCL, 4=CUDA, 5=ROCm
-    pub simd_mode: String,             // "auto", "avx512", "avx2", "scalar"
-    pub simd_mode_id: u32,             // 0=Auto, 1=AVX512, 2=AVX2, 3=Scalar
-    pub ai_enabled: bool,              // true = AI Active, false = Fast Non-AI (<0.2 ms)
-    pub available: bool,               // true if supported on current PC
-    pub availability_label: String,    // "Disponibile" vs "Non presente su questo PC"
-    pub device_name: String,           // Hardware model used by this profile
-    pub avg_frame_ms: f32,             // Measured frame time in milliseconds at 1440x1080
-    pub estimated_fps: f32,            // Estimated maximum sustainable FPS
-    pub estimated_cpu_load_pct: f32,   // Estimated CPU load percentage [0..100] at 30 FPS
-    pub score: u32,                    // Synthetic performance & efficiency score [0..10000]
-    pub recommended: bool,             // True if selected as the optimal profile for this PC
+    pub profile_id: String,          // e.g. "cpu_avx512_ai", "vulkan_ai"
+    pub label: String,               // e.g. "CPU + AVX-512 + AI", "GPU Vulkan + AI"
+    pub compute_backend: String,     // "cpu", "vulkan", "opencl", "cuda", "rocm"
+    pub compute_backend_id: u32,     // 1=CPU, 2=Vulkan, 3=OpenCL, 4=CUDA, 5=ROCm
+    pub simd_mode: String,           // "auto", "avx512", "avx2", "scalar"
+    pub simd_mode_id: u32,           // 0=Auto, 1=AVX512, 2=AVX2, 3=Scalar
+    pub ai_enabled: bool,            // true = AI Active, false = Fast Non-AI (<0.2 ms)
+    pub available: bool,             // true if supported on current PC
+    pub availability_label: String,  // "Disponibile" vs "Non presente su questo PC"
+    pub device_name: String,         // Hardware model used by this profile
+    pub avg_frame_ms: f32,           // Measured frame time in milliseconds at 1440x1080
+    pub estimated_fps: f32,          // Estimated maximum sustainable FPS
+    pub estimated_cpu_load_pct: f32, // Estimated CPU load percentage [0..100] at 30 FPS
+    pub score: u32,                  // Synthetic performance & efficiency score [0..10000]
+    pub recommended: bool,           // True if selected as the optimal profile for this PC
 }
 
 /// Complete hardware fingerprint, device inventory, benchmark table, and optimal recommendation.
@@ -260,9 +260,10 @@ pub fn set_engine_hardware_policy(
             ) == 1;
         }
         if !lib.hmodule.is_null() {
-            if let Some(f_policy) =
-                load_proc_local::<FnSetHardwarePolicy>(lib.hmodule, b"smartcam_engine_set_hardware_policy\0")
-            {
+            if let Some(f_policy) = load_proc_local::<FnSetHardwarePolicy>(
+                lib.hmodule,
+                b"smartcam_engine_set_hardware_policy\0",
+            ) {
                 return f_policy(
                     engine_handle,
                     compute_backend,
@@ -947,9 +948,7 @@ pub fn load_benchmark_report(repo_root: &Path) -> Option<HardwareBenchmarkReport
         .profiles
         .retain(|p| p.available && p.avg_frame_ms > 0.0);
 
-    if !benchmark_schema_v2
-        || report.hardware_fingerprint.is_empty()
-        || report.profiles.is_empty()
+    if !benchmark_schema_v2 || report.hardware_fingerprint.is_empty() || report.profiles.is_empty()
     {
         None
     } else {
@@ -1058,8 +1057,16 @@ pub fn save_benchmark_report(
         escape_yaml_str(&report.timestamp_iso),
         escape_yaml_str(&report.cpu_name),
         report.logical_cores,
-        if report.avx2_supported { "true" } else { "false" },
-        if report.avx512_supported { "true" } else { "false" },
+        if report.avx2_supported {
+            "true"
+        } else {
+            "false"
+        },
+        if report.avx512_supported {
+            "true"
+        } else {
+            "false"
+        },
         escape_yaml_str(&report.benchmark_resolution),
     ));
 
@@ -1078,7 +1085,11 @@ pub fn save_benchmark_report(
         escape_yaml_str(&report.recommended_profile_label),
         escape_yaml_str(&report.recommended_backend),
         escape_yaml_str(&report.recommended_simd),
-        if report.recommended_ai_enabled { "true" } else { "false" },
+        if report.recommended_ai_enabled {
+            "true"
+        } else {
+            "false"
+        },
         report.recommended_score,
         report.recommended_fps,
         report.recommended_cpu_load_pct,
@@ -1144,8 +1155,7 @@ pub fn save_benchmark_report(
         ));
     }
 
-    fs::write(&path, yaml)
-        .map_err(|e| format!("Impossibile salvare {}: {}", path.display(), e))
+    fs::write(&path, yaml).map_err(|e| format!("Impossibile salvare {}: {}", path.display(), e))
 }
 
 // ============================================================================
@@ -1236,15 +1246,7 @@ pub fn run_hardware_benchmark_suite(
             "avx512",
             true,
         ),
-        (
-            "cpu_avx2_ai",
-            "CPU + AVX2 + AI",
-            1,
-            "cpu",
-            2,
-            "avx2",
-            true,
-        ),
+        ("cpu_avx2_ai", "CPU + AVX2 + AI", 1, "cpu", 2, "avx2", true),
         (
             "cpu_avx2_noai",
             "CPU + AVX2 + No-AI",
@@ -1263,42 +1265,10 @@ pub fn run_hardware_benchmark_suite(
             "scalar",
             false,
         ),
-        (
-            "vulkan_ai",
-            "GPU Vulkan + AI",
-            2,
-            "vulkan",
-            0,
-            "auto",
-            true,
-        ),
-        (
-            "opencl_ai",
-            "GPU OpenCL + AI",
-            3,
-            "opencl",
-            0,
-            "auto",
-            true,
-        ),
-        (
-            "cuda_ai",
-            "GPU CUDA + AI",
-            4,
-            "cuda",
-            0,
-            "auto",
-            true,
-        ),
-        (
-            "rocm_ai",
-            "GPU ROCm + AI",
-            5,
-            "rocm",
-            0,
-            "auto",
-            true,
-        ),
+        ("vulkan_ai", "GPU Vulkan + AI", 2, "vulkan", 0, "auto", true),
+        ("opencl_ai", "GPU OpenCL + AI", 3, "opencl", 0, "auto", true),
+        ("cuda_ai", "GPU CUDA + AI", 4, "cuda", 0, "auto", true),
+        ("rocm_ai", "GPU ROCm + AI", 5, "rocm", 0, "auto", true),
     ];
 
     let mut profiles: Vec<BenchmarkProfileEntry> = Vec::with_capacity(specs.len());
@@ -1584,12 +1554,10 @@ fn measure_profile_metrics(
                 );
             }
             let wall_elapsed_ms = (t0.elapsed().as_secs_f64() * 1000.0) as f32;
-            let cpu_delta_100ns =
-                read_current_thread_cpu_100ns().saturating_sub(cpu_start_100ns);
+            let cpu_delta_100ns = read_current_thread_cpu_100ns().saturating_sub(cpu_start_100ns);
 
             let avg_frame_ms = (wall_elapsed_ms / (timed_iters as f32)).max(0.15);
-            let measured_cpu_ms =
-                ((cpu_delta_100ns as f64) * 0.0001 / (timed_iters as f64)) as f32;
+            let measured_cpu_ms = ((cpu_delta_100ns as f64) * 0.0001 / (timed_iters as f64)) as f32;
             let cpu_ms_per_frame = if measured_cpu_ms > 0.05 {
                 measured_cpu_ms
             } else {
@@ -1624,18 +1592,14 @@ fn measure_profile_metrics(
             let row = y * dst_stride;
             for x in 4..((width as usize) - 4) {
                 let i = row + x * 4;
-                bg_buf[i] = ((fg_buf[i - 16] as u16
-                    + fg_buf[i] as u16
-                    + fg_buf[i + 16] as u16)
-                    / 3) as u8;
-                bg_buf[i + 1] = ((fg_buf[i - 15] as u16
-                    + fg_buf[i + 1] as u16
-                    + fg_buf[i + 17] as u16)
-                    / 3) as u8;
-                bg_buf[i + 2] = ((fg_buf[i - 14] as u16
-                    + fg_buf[i + 2] as u16
-                    + fg_buf[i + 18] as u16)
-                    / 3) as u8;
+                bg_buf[i] =
+                    ((fg_buf[i - 16] as u16 + fg_buf[i] as u16 + fg_buf[i + 16] as u16) / 3) as u8;
+                bg_buf[i + 1] =
+                    ((fg_buf[i - 15] as u16 + fg_buf[i + 1] as u16 + fg_buf[i + 17] as u16) / 3)
+                        as u8;
+                bg_buf[i + 2] =
+                    ((fg_buf[i - 14] as u16 + fg_buf[i + 2] as u16 + fg_buf[i + 18] as u16) / 3)
+                        as u8;
             }
         }
 
@@ -1673,11 +1637,9 @@ fn measure_profile_metrics(
                 out_buf[base] =
                     (((fg_buf[base] as u32) * a + (bg_buf[base] as u32) * inv) >> 8) as u8;
                 out_buf[base + 1] =
-                    (((fg_buf[base + 1] as u32) * a + (bg_buf[base + 1] as u32) * inv) >> 8)
-                        as u8;
+                    (((fg_buf[base + 1] as u32) * a + (bg_buf[base + 1] as u32) * inv) >> 8) as u8;
                 out_buf[base + 2] =
-                    (((fg_buf[base + 2] as u32) * a + (bg_buf[base + 2] as u32) * inv) >> 8)
-                        as u8;
+                    (((fg_buf[base + 2] as u32) * a + (bg_buf[base + 2] as u32) * inv) >> 8) as u8;
             }
             i += unroll;
         }
@@ -1734,8 +1696,12 @@ fn strip_yaml_comment(line: &str) -> String {
 fn clean_scalar(val: &str) -> String {
     let v = val.trim();
     // len >= 2: a lone `"` or `'` both starts and ends with the quote but has nothing to strip
-    if v.len() >= 2 && ((v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\''))) {
-        v[1..v.len() - 1].replace("\\\"", "\"").replace("\\\\", "\\")
+    if v.len() >= 2
+        && ((v.starts_with('"') && v.ends_with('"')) || (v.starts_with('\'') && v.ends_with('\'')))
+    {
+        v[1..v.len() - 1]
+            .replace("\\\"", "\"")
+            .replace("\\\\", "\\")
     } else {
         v.to_string()
     }
@@ -1766,7 +1732,10 @@ mod tests {
         aspect_h: u32,
         strategy: u32,
     ) -> i32 {
-        CROP_CALLS.lock().unwrap().push((dst_w, dst_h, aspect_w, aspect_h, strategy));
+        CROP_CALLS
+            .lock()
+            .unwrap()
+            .push((dst_w, dst_h, aspect_w, aspect_h, strategy));
         1
     }
 
@@ -1829,12 +1798,27 @@ mod tests {
         let mut mask = vec![0u8; (out_w * out_h) as usize];
 
         measure_profile_metrics(
-            Some(&lib), engine_handle, 1, 0, false,
-            &mut src, src_w, src_h, &mut fg, &mut bg, &mut mask, &mut out, out_w, out_h,
+            Some(&lib),
+            engine_handle,
+            1,
+            0,
+            false,
+            &mut src,
+            src_w,
+            src_h,
+            &mut fg,
+            &mut bg,
+            &mut mask,
+            &mut out,
+            out_w,
+            out_h,
         );
 
         let calls = CROP_CALLS.lock().unwrap().clone();
-        assert!(!calls.is_empty(), "the benchmark never called smartcam_engine_crop_scale_bgra");
+        assert!(
+            !calls.is_empty(),
+            "the benchmark never called smartcam_engine_crop_scale_bgra"
+        );
         for (dst_w, dst_h, aspect_w, aspect_h, strategy) in calls {
             assert_eq!((dst_w, dst_h), (out_w, out_h));
             // c_api.h: aspect_w:aspect_h is the crop aspect, strategy 0 = center crop, 1 = letterbox.
@@ -1857,7 +1841,8 @@ mod tests {
 
     #[test]
     fn load_benchmark_report_survives_a_lone_quote_value() {
-        let repo_root = std::env::temp_dir().join(format!("smartcam_benchmark_test_{}", std::process::id()));
+        let repo_root =
+            std::env::temp_dir().join(format!("smartcam_benchmark_test_{}", std::process::id()));
         fs::create_dir_all(repo_root.join("config")).expect("create temp config dir");
         fs::write(
             benchmark_yaml_path(&repo_root),

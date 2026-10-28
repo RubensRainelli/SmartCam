@@ -257,9 +257,7 @@ impl AiOnnxSegmenter {
         };
 
         self.set_face_calibration_profile(true, skin_cb, skin_cr, head_rx, head_ry);
-        let landmarks_flat = [
-            rex, rey, lex, ley, nx, ny, lx, ly, cx, cy,
-        ];
+        let landmarks_flat = [rex, rey, lex, ley, nx, ny, lx, ly, cx, cy];
         self.set_face_calibration_landmarks(&landmarks_flat);
 
         (skin_cb, skin_cr, head_rx, head_ry)
@@ -364,7 +362,11 @@ impl AiOnnxSegmenter {
     ) -> bool {
         let w = width as usize;
         let h = height as usize;
-        if w == 0 || h == 0 || input_frame.len() < (stride_in as usize) * h || out_mask.len() < (stride_out as usize) * h {
+        if w == 0
+            || h == 0
+            || input_frame.len() < (stride_in as usize) * h
+            || out_mask.len() < (stride_out as usize) * h
+        {
             return false;
         }
 
@@ -402,13 +404,21 @@ impl AiOnnxSegmenter {
             let l_c0 = input_frame[row_off + 16];
             let l_c1 = input_frame[row_off + 17];
             let l_c2 = input_frame[row_off + 18];
-            let (rl, gl, bl) = if is_bgra { (l_c2 as i32, l_c1 as i32, l_c0 as i32) } else { (l_c0 as i32, l_c1 as i32, l_c2 as i32) };
+            let (rl, gl, bl) = if is_bgra {
+                (l_c2 as i32, l_c1 as i32, l_c0 as i32)
+            } else {
+                (l_c0 as i32, l_c1 as i32, l_c2 as i32)
+            };
 
             let r_idx = row_off + (w.saturating_sub(5)) * 4;
             let r_c0 = input_frame[r_idx];
             let r_c1 = input_frame[r_idx + 1];
             let r_c2 = input_frame[r_idx + 2];
-            let (rr, gr, br) = if is_bgra { (r_c2 as i32, r_c1 as i32, r_c0 as i32) } else { (r_c0 as i32, r_c1 as i32, r_c2 as i32) };
+            let (rr, gr, br) = if is_bgra {
+                (r_c2 as i32, r_c1 as i32, r_c0 as i32)
+            } else {
+                (r_c0 as i32, r_c1 as i32, r_c2 as i32)
+            };
 
             for x in (step..w.saturating_sub(step)).step_by(step) {
                 let nx = (x as f32) / (w.max(1) as f32);
@@ -416,7 +426,11 @@ impl AiOnnxSegmenter {
                 let c0 = input_frame[px + 0];
                 let c1 = input_frame[px + 1];
                 let c2 = input_frame[px + 2];
-                let (r, g, b) = if is_bgra { (c2 as i32, c1 as i32, c0 as i32) } else { (c0 as i32, c1 as i32, c2 as i32) };
+                let (r, g, b) = if is_bgra {
+                    (c2 as i32, c1 as i32, c0 as i32)
+                } else {
+                    (c0 as i32, c1 as i32, c2 as i32)
+                };
 
                 let is_green = g > 135 && g > r + 40 && g > b + 40;
                 if is_green {
@@ -470,7 +484,8 @@ impl AiOnnxSegmenter {
             (self.tracked_cx, self.tracked_cy)
         };
 
-        let jump = ((target_cx - self.tracked_cx).powi(2) + (target_cy - self.tracked_cy).powi(2)).sqrt();
+        let jump =
+            ((target_cx - self.tracked_cx).powi(2) + (target_cy - self.tracked_cy).powi(2)).sqrt();
         let alpha_track = if jump > 0.04 { 0.85 } else { 0.35 };
         self.tracked_cx = self.tracked_cx * (1.0 - alpha_track) + target_cx * alpha_track;
         self.tracked_cy = self.tracked_cy * (1.0 - alpha_track) + target_cy * alpha_track;
@@ -492,7 +507,8 @@ impl AiOnnxSegmenter {
                     let c2 = input_frame[px + 2];
                     let (r, g, b) = if is_bgra { (c2, c1, c0) } else { (c0, c1, c2) };
 
-                    let is_bright_green = g > 140 && g > r.saturating_add(45) && g > b.saturating_add(45);
+                    let is_bright_green =
+                        g > 140 && g > r.saturating_add(45) && g > b.saturating_add(45);
                     let alpha_val = if is_bright_green {
                         0u8
                     } else {
@@ -540,7 +556,8 @@ impl AiOnnxSegmenter {
                 let c2 = input_frame[px + 2];
                 let (r, g, b) = if is_bgra { (c2, c1, c0) } else { (c0, c1, c2) };
 
-                let is_bright_green = g > 140 && g > r.saturating_add(45) && g > b.saturating_add(45);
+                let is_bright_green =
+                    g > 140 && g > r.saturating_add(45) && g > b.saturating_add(45);
                 if is_bright_green {
                     out_mask[m_row + x] = 0;
                     continue;
@@ -554,19 +571,29 @@ impl AiOnnxSegmenter {
                     let rbase = (ry * rw + rx) * 4;
 
                     let (r_ref, g_ref, b_ref) = if is_bgra {
-                        (self.ref_bg_buf[rbase + 2], self.ref_bg_buf[rbase + 1], self.ref_bg_buf[rbase])
+                        (
+                            self.ref_bg_buf[rbase + 2],
+                            self.ref_bg_buf[rbase + 1],
+                            self.ref_bg_buf[rbase],
+                        )
                     } else {
-                        (self.ref_bg_buf[rbase], self.ref_bg_buf[rbase + 1], self.ref_bg_buf[rbase + 2])
+                        (
+                            self.ref_bg_buf[rbase],
+                            self.ref_bg_buf[rbase + 1],
+                            self.ref_bg_buf[rbase + 2],
+                        )
                     };
 
                     let y_cur = (r as i32 * 77 + g as i32 * 150 + b as i32 * 29) >> 8;
-                    let y_ref_val = (r_ref as i32 * 77 + g_ref as i32 * 150 + b_ref as i32 * 29) >> 8;
+                    let y_ref_val =
+                        (r_ref as i32 * 77 + g_ref as i32 * 150 + b_ref as i32 * 29) >> 8;
                     let cb_cur = b as i32 - y_cur;
                     let cr_cur = r as i32 - y_cur;
                     let cb_ref = b_ref as i32 - y_ref_val;
                     let cr_ref = r_ref as i32 - y_ref_val;
 
-                    let d_chroma = ((cb_cur - cb_ref).abs() + (cr_cur - cr_ref).abs()) as f32 / 255.0;
+                    let d_chroma =
+                        ((cb_cur - cb_ref).abs() + (cr_cur - cr_ref).abs()) as f32 / 255.0;
                     let d_luma = (y_cur - y_ref_val).abs() as f32 / 255.0;
                     let luma_gate = (0.04 + tol * 0.14).clamp(0.04, 0.20);
                     let eff_luma = (d_luma - luma_gate).max(0.0);

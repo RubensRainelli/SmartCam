@@ -11,6 +11,9 @@ license.workspace = true
 description = "SmartCam v2.0 Pure Media Foundation In-Process COM Virtual Camera Source (smartcam_mf_source.dll)"
 publish = false
 
+[lints]
+workspace = true
+
 [lib]
 name = "smartcam_mf_source"
 crate-type = ["cdylib", "rlib"]

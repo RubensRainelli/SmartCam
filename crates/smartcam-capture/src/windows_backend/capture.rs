@@ -18,17 +18,14 @@ use windows::{
     core::{GUID, PWSTR},
     Win32::{
         Media::MediaFoundation::{
-            IMFActivate, IMFAttributes, IMFSourceReader,
-            MFCreateAttributes, MFCreateMediaType, MFCreateSourceReaderFromMediaSource,
-            MFEnumDeviceSources, MFShutdown, MFStartup,
-            MFVideoFormat_RGB32, MFMediaType_Video,
-            MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
-            MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
-            MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID,
-            MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
-            MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE,
-            MF_SOURCE_READERF_ERROR, MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING,
-            MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_VERSION,
+            IMFActivate, IMFAttributes, IMFSourceReader, MFCreateAttributes, MFCreateMediaType,
+            MFCreateSourceReaderFromMediaSource, MFEnumDeviceSources, MFMediaType_Video,
+            MFShutdown, MFStartup, MFVideoFormat_RGB32, MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
+            MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID,
+            MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK, MF_MT_FRAME_RATE,
+            MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_SOURCE_READERF_ERROR,
+            MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+            MF_VERSION,
         },
         System::Com::{CoInitializeEx, CoTaskMemFree, CoUninitialize, COINIT_MULTITHREADED},
     },
@@ -40,15 +37,30 @@ use crate::{
     types::{CameraCaptureConfig, CameraDeviceInfo, CameraSource},
 };
 
-pub fn mf_set_attribute_size(attrs: &IMFAttributes, guid: &GUID, width: u32, height: u32) -> windows::core::Result<()> {
+pub fn mf_set_attribute_size(
+    attrs: &IMFAttributes,
+    guid: &GUID,
+    width: u32,
+    height: u32,
+) -> windows::core::Result<()> {
     unsafe { attrs.SetUINT64(guid, ((width as u64) << 32) | (height as u64)) }
 }
 
-pub fn mf_set_attribute_ratio(attrs: &IMFAttributes, guid: &GUID, num: u32, den: u32) -> windows::core::Result<()> {
+pub fn mf_set_attribute_ratio(
+    attrs: &IMFAttributes,
+    guid: &GUID,
+    num: u32,
+    den: u32,
+) -> windows::core::Result<()> {
     unsafe { attrs.SetUINT64(guid, ((num as u64) << 32) | (den as u64)) }
 }
 
-pub fn mf_get_attribute_size(attrs: &IMFAttributes, guid: &GUID, width: &mut u32, height: &mut u32) -> windows::core::Result<()> {
+pub fn mf_get_attribute_size(
+    attrs: &IMFAttributes,
+    guid: &GUID,
+    width: &mut u32,
+    height: &mut u32,
+) -> windows::core::Result<()> {
     unsafe {
         let val = attrs.GetUINT64(guid)?;
         *width = (val >> 32) as u32;
@@ -57,7 +69,12 @@ pub fn mf_get_attribute_size(attrs: &IMFAttributes, guid: &GUID, width: &mut u32
     }
 }
 
-pub fn mf_get_attribute_ratio(attrs: &IMFAttributes, guid: &GUID, num: &mut u32, den: &mut u32) -> windows::core::Result<()> {
+pub fn mf_get_attribute_ratio(
+    attrs: &IMFAttributes,
+    guid: &GUID,
+    num: &mut u32,
+    den: &mut u32,
+) -> windows::core::Result<()> {
     unsafe {
         let val = attrs.GetUINT64(guid)?;
         *num = (val >> 32) as u32;
@@ -99,48 +116,56 @@ pub fn enumerate_camera_devices() -> Vec<CameraDeviceInfo> {
                 let mut pp_devices: *mut Option<IMFActivate> = std::ptr::null_mut();
                 let mut count = 0u32;
 
-                if MFEnumDeviceSources(&attr, &mut pp_devices, &mut count).is_ok() && !pp_devices.is_null() {
+                if MFEnumDeviceSources(&attr, &mut pp_devices, &mut count).is_ok()
+                    && !pp_devices.is_null()
+                {
                     let activates = std::slice::from_raw_parts(pp_devices, count as usize);
-                    for activate_opt in activates.iter() {
-                        if let Some(activate) = activate_opt {
-                            let mut friendly_name = String::new();
-                            let mut symbolic_link = String::new();
+                    for activate in activates.iter().flatten() {
+                        let mut friendly_name = String::new();
+                        let mut symbolic_link = String::new();
 
-                            let mut name_ptr = PWSTR::null();
-                            let mut name_len = 0u32;
-                            if activate.GetAllocatedString(
+                        let mut name_ptr = PWSTR::null();
+                        let mut name_len = 0u32;
+                        if activate
+                            .GetAllocatedString(
                                 &MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
                                 &mut name_ptr,
                                 &mut name_len,
-                            ).is_ok() && !name_ptr.is_null() {
-                                friendly_name = pwstr_to_string(name_ptr);
-                                CoTaskMemFree(Some(name_ptr.0 as *mut c_void));
-                            }
+                            )
+                            .is_ok()
+                            && !name_ptr.is_null()
+                        {
+                            friendly_name = pwstr_to_string(name_ptr);
+                            CoTaskMemFree(Some(name_ptr.0 as *mut c_void));
+                        }
 
-                            let mut sym_ptr = PWSTR::null();
-                            let mut sym_len = 0u32;
-                            if activate.GetAllocatedString(
+                        let mut sym_ptr = PWSTR::null();
+                        let mut sym_len = 0u32;
+                        if activate
+                            .GetAllocatedString(
                                 &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
                                 &mut sym_ptr,
                                 &mut sym_len,
-                            ).is_ok() && !sym_ptr.is_null() {
-                                symbolic_link = pwstr_to_string(sym_ptr);
-                                CoTaskMemFree(Some(sym_ptr.0 as *mut c_void));
-                            }
+                            )
+                            .is_ok()
+                            && !sym_ptr.is_null()
+                        {
+                            symbolic_link = pwstr_to_string(sym_ptr);
+                            CoTaskMemFree(Some(sym_ptr.0 as *mut c_void));
+                        }
 
-                            if friendly_name != "SmartCam"
-                                && !friendly_name.contains("SmartCam Virtual Camera")
-                                && !symbolic_link.contains(SMARTCAM_MF_CLSID_STR)
-                            {
-                                let is_infrared = is_ir_camera_name(&friendly_name, &symbolic_link);
-                                let index = devices.len() as u32;
-                                devices.push(CameraDeviceInfo {
-                                    index,
-                                    friendly_name,
-                                    symbolic_link,
-                                    is_infrared,
-                                });
-                            }
+                        if friendly_name != "SmartCam"
+                            && !friendly_name.contains("SmartCam Virtual Camera")
+                            && !symbolic_link.contains(SMARTCAM_MF_CLSID_STR)
+                        {
+                            let is_infrared = is_ir_camera_name(&friendly_name, &symbolic_link);
+                            let index = devices.len() as u32;
+                            devices.push(CameraDeviceInfo {
+                                index,
+                                friendly_name,
+                                symbolic_link,
+                                is_infrared,
+                            });
                         }
                     }
                     CoTaskMemFree(Some(pp_devices as *mut c_void));
@@ -155,6 +180,7 @@ pub fn enumerate_camera_devices() -> Vec<CameraDeviceInfo> {
 }
 
 /// Native Windows Media Foundation hardware webcam capture (`IMFSourceReader`).
+#[derive(Default)]
 pub struct MfCameraCapture {
     reader: Option<IMFSourceReader>,
     actual_config: CameraCaptureConfig,
@@ -164,18 +190,6 @@ pub struct MfCameraCapture {
 }
 
 unsafe impl Send for MfCameraCapture {}
-
-impl Default for MfCameraCapture {
-    fn default() -> Self {
-        Self {
-            reader: None,
-            actual_config: CameraCaptureConfig::default(),
-            frame_counter: 0,
-            mf_started: false,
-            is_open: false,
-        }
-    }
-}
 
 impl MfCameraCapture {
     pub fn new() -> Self {
@@ -198,7 +212,8 @@ impl CameraSource for MfCameraCapture {
 
         unsafe {
             let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
-            if hr.is_err() && hr != windows::core::HRESULT(-2147417850) { // RPC_E_CHANGED_MODE
+            if hr.is_err() && hr != windows::core::HRESULT(-2147417850) {
+                // RPC_E_CHANGED_MODE
                 return false;
             }
 
@@ -243,11 +258,15 @@ impl CameraSource for MfCameraCapture {
                     if let Some(act) = act_opt {
                         let mut sym_ptr = PWSTR::null();
                         let mut sym_len = 0u32;
-                        if act.GetAllocatedString(
-                            &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
-                            &mut sym_ptr,
-                            &mut sym_len,
-                        ).is_ok() && !sym_ptr.is_null() {
+                        if act
+                            .GetAllocatedString(
+                                &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
+                                &mut sym_ptr,
+                                &mut sym_len,
+                            )
+                            .is_ok()
+                            && !sym_ptr.is_null()
+                        {
                             let sym = pwstr_to_string(sym_ptr);
                             CoTaskMemFree(Some(sym_ptr.0 as *mut c_void));
                             if sym.contains(&config.device_id) {
@@ -286,19 +305,21 @@ impl CameraSource for MfCameraCapture {
                 let _ = r_attr.SetUINT32(&MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, 1);
             }
 
-            let reader = match MFCreateSourceReaderFromMediaSource(&media_source, reader_attr.as_ref()) {
-                Ok(r) => r,
-                Err(_) => {
-                    self.close();
-                    return false;
-                }
-            };
+            let reader =
+                match MFCreateSourceReaderFromMediaSource(&media_source, reader_attr.as_ref()) {
+                    Ok(r) => r,
+                    Err(_) => {
+                        self.close();
+                        return false;
+                    }
+                };
 
             // Request target format (MFVideoFormat_RGB32)
             if let Ok(out_t) = MFCreateMediaType() {
                 let _ = out_t.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video);
                 let _ = out_t.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_RGB32);
-                let _ = mf_set_attribute_size(&out_t, &MF_MT_FRAME_SIZE, config.width, config.height);
+                let _ =
+                    mf_set_attribute_size(&out_t, &MF_MT_FRAME_SIZE, config.width, config.height);
                 let _ = mf_set_attribute_ratio(&out_t, &MF_MT_FRAME_RATE, config.target_fps, 1);
 
                 let set_hr = reader.SetCurrentMediaType(
@@ -311,11 +332,14 @@ impl CameraSource for MfCameraCapture {
                     if let Ok(fb_t) = MFCreateMediaType() {
                         let _ = fb_t.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video);
                         let _ = fb_t.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_RGB32);
-                        if reader.SetCurrentMediaType(
-                            MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32,
-                            None,
-                            &fb_t,
-                        ).is_err() {
+                        if reader
+                            .SetCurrentMediaType(
+                                MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32,
+                                None,
+                                &fb_t,
+                            )
+                            .is_err()
+                        {
                             self.close();
                             return false;
                         }
@@ -324,7 +348,9 @@ impl CameraSource for MfCameraCapture {
             }
 
             // Query negotiated resolution & framerate
-            if let Ok(current_type) = reader.GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32) {
+            if let Ok(current_type) =
+                reader.GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32)
+            {
                 let mut w = 0u32;
                 let mut h = 0u32;
                 if mf_get_attribute_size(&current_type, &MF_MT_FRAME_SIZE, &mut w, &mut h).is_ok() {
@@ -333,7 +359,10 @@ impl CameraSource for MfCameraCapture {
                 }
                 let mut fps_n = 0u32;
                 let mut fps_d = 1u32;
-                if mf_get_attribute_ratio(&current_type, &MF_MT_FRAME_RATE, &mut fps_n, &mut fps_d).is_ok() && fps_d > 0 {
+                if mf_get_attribute_ratio(&current_type, &MF_MT_FRAME_RATE, &mut fps_n, &mut fps_d)
+                    .is_ok()
+                    && fps_d > 0
+                {
                     self.actual_config.target_fps = fps_n / fps_d;
                 }
             }
@@ -348,10 +377,7 @@ impl CameraSource for MfCameraCapture {
         if !self.is_open {
             return None;
         }
-        let reader = match self.reader.as_ref() {
-            Some(r) => r,
-            None => return None,
-        };
+        let reader = self.reader.as_ref()?;
 
         unsafe {
             let mut actual_stream_index = 0u32;
@@ -392,12 +418,19 @@ impl CameraSource for MfCameraCapture {
             let success = if self.actual_config.bit_depth == 64 {
                 dst_bgra.resize(expected_bytes_64, 0);
                 if (cur_len as usize) >= expected_bytes_64 {
-                    std::ptr::copy_nonoverlapping(raw_ptr, dst_bgra.as_mut_ptr(), expected_bytes_64);
+                    std::ptr::copy_nonoverlapping(
+                        raw_ptr,
+                        dst_bgra.as_mut_ptr(),
+                        expected_bytes_64,
+                    );
                     true
                 } else if (cur_len as usize) >= expected_bytes_32 {
                     // Convert 8-bit to 16-bit BGRA: each channel val * 257 (0..255 -> 0..65535)
                     let src_slice = std::slice::from_raw_parts(raw_ptr, expected_bytes_32);
-                    let dst_u16 = std::slice::from_raw_parts_mut(dst_bgra.as_mut_ptr() as *mut u16, (w * h * 4) as usize);
+                    let dst_u16 = std::slice::from_raw_parts_mut(
+                        dst_bgra.as_mut_ptr() as *mut u16,
+                        (w * h * 4) as usize,
+                    );
                     for i in 0..expected_bytes_32 {
                         dst_u16[i] = (src_slice[i] as u16) * 257;
                     }

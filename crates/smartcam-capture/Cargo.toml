@@ -11,6 +11,9 @@ license.workspace = true
 description = "SmartCam v2.0 Cross-Platform Camera Capture & Virtual Camera Sink (Media Foundation on Windows, V4L2 on Linux, CoreMediaIO on macOS)"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 
 [target.'cfg(windows)'.dependencies]

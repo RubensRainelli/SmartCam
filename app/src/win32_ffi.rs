@@ -13,7 +13,12 @@
  * The full license can be found in the LICENSE file.
  */
 
-#![allow(non_snake_case, non_camel_case_types, non_upper_case_globals, dead_code)]
+#![allow(
+    non_snake_case,
+    non_camel_case_types,
+    non_upper_case_globals,
+    dead_code
+)]
 
 use std::ffi::c_void;
 
@@ -235,7 +240,12 @@ pub struct RECT {
 
 impl RECT {
     pub fn new(left: i32, top: i32, right: i32, bottom: i32) -> Self {
-        Self { left, top, right, bottom }
+        Self {
+            left,
+            top,
+            right,
+            bottom,
+        }
     }
     pub fn contains(&self, x: i32, y: i32) -> bool {
         x >= self.left && x < self.right && y >= self.top && y < self.bottom
@@ -501,7 +511,12 @@ extern "system" {
     pub fn BringWindowToTop(hWnd: HWND) -> BOOL;
     pub fn GetSystemMetrics(nIndex: INT) -> INT;
     pub fn DefWindowProcW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRESULT;
-    pub fn GetMessageW(lpMsg: *mut MSG, hWnd: HWND, wMsgFilterMin: UINT, wMsgFilterMax: UINT) -> BOOL;
+    pub fn GetMessageW(
+        lpMsg: *mut MSG,
+        hWnd: HWND,
+        wMsgFilterMin: UINT,
+        wMsgFilterMax: UINT,
+    ) -> BOOL;
     pub fn PeekMessageW(
         lpMsg: *mut MSG,
         hWnd: HWND,
@@ -514,7 +529,12 @@ extern "system" {
     pub fn PostQuitMessage(nExitCode: INT);
     pub fn SendMessageW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRESULT;
     pub fn PostMessageW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) -> BOOL;
-    pub fn SetTimer(hWnd: HWND, nIDEvent: usize, uElapse: UINT, lpTimerFunc: *const c_void) -> usize;
+    pub fn SetTimer(
+        hWnd: HWND,
+        nIDEvent: usize,
+        uElapse: UINT,
+        lpTimerFunc: *const c_void,
+    ) -> usize;
     pub fn KillTimer(hWnd: HWND, uIDEvent: usize) -> BOOL;
     pub fn BeginPaint(hWnd: HWND, lpPaint: *mut PAINTSTRUCT) -> HDC;
     pub fn EndPaint(hWnd: HWND, lpPaint: *const PAINTSTRUCT) -> BOOL;
@@ -546,7 +566,12 @@ extern "system" {
     pub fn ReleaseCapture() -> BOOL;
     pub fn MessageBoxW(hWnd: HWND, lpText: *const u16, lpCaption: *const u16, uType: UINT) -> INT;
     pub fn CreatePopupMenu() -> HMENU;
-    pub fn AppendMenuW(hMenu: HMENU, uFlags: UINT, uIDNewItem: usize, lpNewItem: *const u16) -> BOOL;
+    pub fn AppendMenuW(
+        hMenu: HMENU,
+        uFlags: UINT,
+        uIDNewItem: usize,
+        lpNewItem: *const u16,
+    ) -> BOOL;
     pub fn TrackPopupMenu(
         hMenu: HMENU,
         uFlags: UINT,
@@ -559,7 +584,14 @@ extern "system" {
     pub fn DestroyMenu(hMenu: HMENU) -> BOOL;
     pub fn GetCursorPos(lpPoint: *mut POINT) -> BOOL;
     pub fn ScreenToClient(hWnd: HWND, lpPoint: *mut POINT) -> BOOL;
-    pub fn MoveWindow(hWnd: HWND, X: INT, Y: INT, nWidth: INT, nHeight: INT, bRepaint: BOOL) -> BOOL;
+    pub fn MoveWindow(
+        hWnd: HWND,
+        X: INT,
+        Y: INT,
+        nWidth: INT,
+        nHeight: INT,
+        bRepaint: BOOL,
+    ) -> BOOL;
     pub fn SetWindowTextW(hWnd: HWND, lpString: *const u16) -> BOOL;
 }
 
@@ -626,7 +658,15 @@ extern "system" {
         y1: INT,
         rop: DWORD,
     ) -> BOOL;
-    pub fn RoundRect(hdc: HDC, left: INT, top: INT, right: INT, bottom: INT, width: INT, height: INT) -> BOOL;
+    pub fn RoundRect(
+        hdc: HDC,
+        left: INT,
+        top: INT,
+        right: INT,
+        bottom: INT,
+        width: INT,
+        height: INT,
+    ) -> BOOL;
 }
 
 #[link(name = "comdlg32")]
@@ -792,7 +832,10 @@ pub fn decode_image_file_gdiplus(path: &std::path::Path) -> Option<(Vec<u8>, u32
 }
 
 /// Opens the native Windows file picker (`GetOpenFileNameW`) for `.jpg`, `.jpeg`, `.png`, `.bmp` images.
-pub fn open_background_file_dialog(hwnd_owner: HWND, initial_dir: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+pub fn open_background_file_dialog(
+    hwnd_owner: HWND,
+    initial_dir: Option<&std::path::Path>,
+) -> Option<std::path::PathBuf> {
     unsafe {
         // Filter string uses embedded NULs: "Immagini Sfondo (*.jpg;*.jpeg;*.png;*.bmp)\0*.jpg;*.jpeg;*.png;*.bmp\0Tutti i file (*.*)\0*.*\0\0"
         let filter_str = "Immagini Sfondo (*.jpg;*.jpeg;*.png;*.bmp)\0*.jpg;*.jpeg;*.png;*.bmp\0Tutti i file (*.*)\0*.*\0\0";
@@ -808,7 +851,10 @@ pub fn open_background_file_dialog(hwnd_owner: HWND, initial_dir: Option<&std::p
         ofn.nFilterIndex = 1;
         ofn.lpstrFile = file_buf.as_mut_ptr();
         ofn.nMaxFile = file_buf.len() as DWORD;
-        ofn.lpstrInitialDir = init_dir_w.as_ref().map(|v| v.as_ptr()).unwrap_or(std::ptr::null());
+        ofn.lpstrInitialDir = init_dir_w
+            .as_ref()
+            .map(|v| v.as_ptr())
+            .unwrap_or(std::ptr::null());
         ofn.lpstrTitle = title_w.as_ptr();
         ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER;
 
@@ -867,5 +913,3 @@ pub fn read_clipboard_text(hwnd_owner: HWND) -> Option<String> {
         }
     }
 }
-
-

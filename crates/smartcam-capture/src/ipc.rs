@@ -25,10 +25,12 @@ use crate::header::{
 use windows::{
     core::PCWSTR,
     Win32::{
-        Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, INVALID_HANDLE_VALUE},
+        Foundation::{
+            CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, INVALID_HANDLE_VALUE,
+        },
         Security::{
-            InitializeSecurityDescriptor, SetSecurityDescriptorDacl,
-            PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR,
+            InitializeSecurityDescriptor, SetSecurityDescriptorDacl, PSECURITY_DESCRIPTOR,
+            SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR,
         },
         System::{
             Memory::{
@@ -65,13 +67,15 @@ unsafe impl Sync for SharedFrameIpc {}
 impl SharedFrameIpc {
     /// Creates or opens a named shared memory mapping and synchronization event.
     #[cfg(windows)]
-    pub fn open_or_create(
-        mapping_name: &str,
-        event_name: &str,
-        is_producer: bool,
-    ) -> Option<Self> {
-        let wide_map: Vec<u16> = mapping_name.encode_utf16().chain(std::iter::once(0)).collect();
-        let wide_ev: Vec<u16> = event_name.encode_utf16().chain(std::iter::once(0)).collect();
+    pub fn open_or_create(mapping_name: &str, event_name: &str, is_producer: bool) -> Option<Self> {
+        let wide_map: Vec<u16> = mapping_name
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let wide_ev: Vec<u16> = event_name
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
 
         let total_bytes = TOTAL_SHARED_FRAME_BYTES;
         let size_high = ((total_bytes as u64 >> 32) & 0xFFFF_FFFF) as u32;
@@ -106,19 +110,11 @@ impl SharedFrameIpc {
             let mut newly_created = false;
 
             if !is_producer {
-                let h = OpenFileMappingW(
-                    FILE_MAP_ALL_ACCESS.0,
-                    false,
-                    PCWSTR(wide_map.as_ptr()),
-                );
+                let h = OpenFileMappingW(FILE_MAP_ALL_ACCESS.0, false, PCWSTR(wide_map.as_ptr()));
                 if let Ok(h) = h {
                     mapping_handle = Some(h);
                 } else {
-                    let h_ro = OpenFileMappingW(
-                        FILE_MAP_READ.0,
-                        false,
-                        PCWSTR(wide_map.as_ptr()),
-                    );
+                    let h_ro = OpenFileMappingW(FILE_MAP_READ.0, false, PCWSTR(wide_map.as_ptr()));
                     if let Ok(h_ro) = h_ro {
                         mapping_handle = Some(h_ro);
                         read_only = true;
@@ -140,11 +136,8 @@ impl SharedFrameIpc {
                     newly_created = GetLastError() != ERROR_ALREADY_EXISTS;
                     mapping_handle = Some(h);
                 } else {
-                    let h_open = OpenFileMappingW(
-                        FILE_MAP_ALL_ACCESS.0,
-                        false,
-                        PCWSTR(wide_map.as_ptr()),
-                    );
+                    let h_open =
+                        OpenFileMappingW(FILE_MAP_ALL_ACCESS.0, false, PCWSTR(wide_map.as_ptr()));
                     if let Ok(h_open) = h_open {
                         mapping_handle = Some(h_open);
                     } else {
@@ -188,11 +181,7 @@ impl SharedFrameIpc {
                     event_handle = Some(ev);
                 }
             } else {
-                let ev = OpenEventW(
-                    EVENT_MODIFY_STATE,
-                    false,
-                    PCWSTR(wide_ev.as_ptr()),
-                );
+                let ev = OpenEventW(EVENT_MODIFY_STATE, false, PCWSTR(wide_ev.as_ptr()));
                 if let Ok(ev) = ev {
                     event_handle = Some(ev);
                 }
@@ -262,7 +251,11 @@ impl SharedFrameIpc {
 
     /// Convenience default open for consumer.
     pub fn open_default_consumer() -> Option<Self> {
-        Self::open_or_create(DEFAULT_SHARED_MAPPING_NAME, DEFAULT_SHARED_EVENT_NAME, false)
+        Self::open_or_create(
+            DEFAULT_SHARED_MAPPING_NAME,
+            DEFAULT_SHARED_EVENT_NAME,
+            false,
+        )
     }
 
     /// Returns true if this IPC instance was created as a producer.
@@ -329,7 +322,8 @@ impl SharedFrameIpc {
 
         let dst_stride = width as usize * 4;
         let frame_bytes = dst_stride * height as usize;
-        if frame_bytes == 0 || frame_bytes > MAX_SHARED_FRAME_BYTES || src_data.len() < frame_bytes {
+        if frame_bytes == 0 || frame_bytes > MAX_SHARED_FRAME_BYTES || src_data.len() < frame_bytes
+        {
             return false;
         }
 
@@ -443,7 +437,8 @@ impl SharedFrameIpc {
                     .map(|d| d.as_millis() as i64)
                     .unwrap_or(0);
 
-                hdr.last_consumer_heartbeat_ms.store(now_ms, Ordering::SeqCst);
+                hdr.last_consumer_heartbeat_ms
+                    .store(now_ms, Ordering::SeqCst);
                 hdr.consumer_requests.fetch_add(1, Ordering::SeqCst);
             }
         }
@@ -480,9 +475,10 @@ impl SharedFrameIpc {
         #[cfg(windows)]
         unsafe {
             if !self.mapped_view.is_null() {
-                let _ = UnmapViewOfFile(windows::Win32::System::Memory::MEMORY_MAPPED_VIEW_ADDRESS {
-                    Value: self.mapped_view as *mut core::ffi::c_void,
-                });
+                let _ =
+                    UnmapViewOfFile(windows::Win32::System::Memory::MEMORY_MAPPED_VIEW_ADDRESS {
+                        Value: self.mapped_view as *mut core::ffi::c_void,
+                    });
                 self.mapped_view = std::ptr::null_mut();
             }
             if let Some(h) = self.mapping_handle.take() {

@@ -19,7 +19,10 @@ use std::path::Path;
 
 use crate::{
     ir::is_ir_camera_name,
-    types::{CameraCaptureConfig, CameraDeviceInfo, CameraSource, VirtualCameraSink, VirtualCameraSinkConfig},
+    types::{
+        CameraCaptureConfig, CameraDeviceInfo, CameraSource, VirtualCameraSink,
+        VirtualCameraSinkConfig,
+    },
 };
 
 /// Scans `/sys/class/video4linux/video*` or `/dev/video*` to list connected physical V4L2 cameras.

@@ -115,8 +115,14 @@ pub fn compute_social_crop_rect(
     }
     let rect = compute_center_crop_rect(src_w, src_h, aspect_w, aspect_h);
     let z = zoom.clamp(1.0, 4.0);
-    let cw = ((rect.width as f32) / z).round().max(16.0).min(src_w as f32) as u32;
-    let ch = ((rect.height as f32) / z).round().max(16.0).min(src_h as f32) as u32;
+    let cw = ((rect.width as f32) / z)
+        .round()
+        .max(16.0)
+        .min(src_w as f32) as u32;
+    let ch = ((rect.height as f32) / z)
+        .round()
+        .max(16.0)
+        .min(src_h as f32) as u32;
 
     let max_x = src_w.saturating_sub(cw);
     let max_y = src_h.saturating_sub(ch);
@@ -431,8 +437,7 @@ pub fn crop_scale_bgra_scalar(
                 height: dst_h,
             };
             resize_bilinear_roi_scalar(
-                src, src_w, src_h, stride_src, src_crop, dst, dst_w, dst_h, stride_dst, dst_full,
-                4,
+                src, src_w, src_h, stride_src, src_crop, dst, dst_w, dst_h, stride_dst, dst_full, 4,
             )
         }
         CropStrategy::Letterbox => {
@@ -456,8 +461,7 @@ pub fn crop_scale_bgra_scalar(
             };
             let dst_box = compute_center_crop_rect(dst_w, dst_h, src_w, src_h);
             resize_bilinear_roi_scalar(
-                src, src_w, src_h, stride_src, src_full, dst, dst_w, dst_h, stride_dst, dst_box,
-                4,
+                src, src_w, src_h, stride_src, src_full, dst, dst_w, dst_h, stride_dst, dst_box, 4,
             )
         }
     }

@@ -95,9 +95,12 @@ pub fn blend_bgra_scalar(
             let inv_a = 256 - alpha;
 
             let px = x * 4;
-            out_row[px + 0] = ((fg_row[px + 0] as u32 * alpha + bg_row[px + 0] as u32 * inv_a) >> 8) as u8;
-            out_row[px + 1] = ((fg_row[px + 1] as u32 * alpha + bg_row[px + 1] as u32 * inv_a) >> 8) as u8;
-            out_row[px + 2] = ((fg_row[px + 2] as u32 * alpha + bg_row[px + 2] as u32 * inv_a) >> 8) as u8;
+            out_row[px + 0] =
+                ((fg_row[px + 0] as u32 * alpha + bg_row[px + 0] as u32 * inv_a) >> 8) as u8;
+            out_row[px + 1] =
+                ((fg_row[px + 1] as u32 * alpha + bg_row[px + 1] as u32 * inv_a) >> 8) as u8;
+            out_row[px + 2] =
+                ((fg_row[px + 2] as u32 * alpha + bg_row[px + 2] as u32 * inv_a) >> 8) as u8;
             out_row[px + 3] = 255;
         }
     }
@@ -195,12 +198,15 @@ pub unsafe fn blend_bgra_avx2(
             let inv_a = 256 - alpha;
 
             let px = x * 4;
-            *out_row.add(px + 0) =
-                ((*fg_row.add(px + 0) as u32 * alpha + *bg_row.add(px + 0) as u32 * inv_a) >> 8) as u8;
-            *out_row.add(px + 1) =
-                ((*fg_row.add(px + 1) as u32 * alpha + *bg_row.add(px + 1) as u32 * inv_a) >> 8) as u8;
-            *out_row.add(px + 2) =
-                ((*fg_row.add(px + 2) as u32 * alpha + *bg_row.add(px + 2) as u32 * inv_a) >> 8) as u8;
+            *out_row.add(px + 0) = ((*fg_row.add(px + 0) as u32 * alpha
+                + *bg_row.add(px + 0) as u32 * inv_a)
+                >> 8) as u8;
+            *out_row.add(px + 1) = ((*fg_row.add(px + 1) as u32 * alpha
+                + *bg_row.add(px + 1) as u32 * inv_a)
+                >> 8) as u8;
+            *out_row.add(px + 2) = ((*fg_row.add(px + 2) as u32 * alpha
+                + *bg_row.add(px + 2) as u32 * inv_a)
+                >> 8) as u8;
             *out_row.add(px + 3) = 255;
             x += 1;
         }
@@ -297,12 +303,15 @@ pub unsafe fn blend_bgra_avx512(
             let inv_a = 256 - alpha;
 
             let px = x * 4;
-            *out_row.add(px + 0) =
-                ((*fg_row.add(px + 0) as u32 * alpha + *bg_row.add(px + 0) as u32 * inv_a) >> 8) as u8;
-            *out_row.add(px + 1) =
-                ((*fg_row.add(px + 1) as u32 * alpha + *bg_row.add(px + 1) as u32 * inv_a) >> 8) as u8;
-            *out_row.add(px + 2) =
-                ((*fg_row.add(px + 2) as u32 * alpha + *bg_row.add(px + 2) as u32 * inv_a) >> 8) as u8;
+            *out_row.add(px + 0) = ((*fg_row.add(px + 0) as u32 * alpha
+                + *bg_row.add(px + 0) as u32 * inv_a)
+                >> 8) as u8;
+            *out_row.add(px + 1) = ((*fg_row.add(px + 1) as u32 * alpha
+                + *bg_row.add(px + 1) as u32 * inv_a)
+                >> 8) as u8;
+            *out_row.add(px + 2) = ((*fg_row.add(px + 2) as u32 * alpha
+                + *bg_row.add(px + 2) as u32 * inv_a)
+                >> 8) as u8;
             *out_row.add(px + 3) = 255;
             x += 1;
         }
@@ -374,12 +383,19 @@ pub fn blend_bgra_neon(
                 let bg_lo = vmovl_u8(vget_low_u8(bg_data));
                 let bg_hi = vmovl_u8(vget_high_u8(bg_data));
 
-                let res_lo = vshrq_n_u16(vaddq_u16(vmulq_u16(fg_lo, a_lo), vmulq_u16(bg_lo, inv_lo)), 8);
-                let res_hi = vshrq_n_u16(vaddq_u16(vmulq_u16(fg_hi, a_hi), vmulq_u16(bg_hi, inv_hi)), 8);
+                let res_lo = vshrq_n_u16(
+                    vaddq_u16(vmulq_u16(fg_lo, a_lo), vmulq_u16(bg_lo, inv_lo)),
+                    8,
+                );
+                let res_hi = vshrq_n_u16(
+                    vaddq_u16(vmulq_u16(fg_hi, a_hi), vmulq_u16(bg_hi, inv_hi)),
+                    8,
+                );
 
                 let mut packed = vcombine_u8(vqmovn_u16(res_lo), vqmovn_u16(res_hi));
                 // Set alpha channel to 255 for all 4 pixels
-                let alpha_mask = uint8x16_t::from([0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255]);
+                let alpha_mask =
+                    uint8x16_t::from([0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255]);
                 packed = vorrq_u8(packed, alpha_mask);
 
                 vst1q_u8(out_row.add(px_off), packed);
@@ -392,12 +408,15 @@ pub fn blend_bgra_neon(
                 let inv_a = 256 - alpha;
 
                 let px = x * 4;
-                *out_row.add(px + 0) =
-                    ((*fg_row.add(px + 0) as u32 * alpha + *bg_row.add(px + 0) as u32 * inv_a) >> 8) as u8;
-                *out_row.add(px + 1) =
-                    ((*fg_row.add(px + 1) as u32 * alpha + *bg_row.add(px + 1) as u32 * inv_a) >> 8) as u8;
-                *out_row.add(px + 2) =
-                    ((*fg_row.add(px + 2) as u32 * alpha + *bg_row.add(px + 2) as u32 * inv_a) >> 8) as u8;
+                *out_row.add(px + 0) = ((*fg_row.add(px + 0) as u32 * alpha
+                    + *bg_row.add(px + 0) as u32 * inv_a)
+                    >> 8) as u8;
+                *out_row.add(px + 1) = ((*fg_row.add(px + 1) as u32 * alpha
+                    + *bg_row.add(px + 1) as u32 * inv_a)
+                    >> 8) as u8;
+                *out_row.add(px + 2) = ((*fg_row.add(px + 2) as u32 * alpha
+                    + *bg_row.add(px + 2) as u32 * inv_a)
+                    >> 8) as u8;
                 *out_row.add(px + 3) = 255;
                 x += 1;
             }
@@ -433,7 +452,15 @@ pub fn blend_bgra(
         {
             return unsafe {
                 blend_bgra_avx512(
-                    fg, bg, mask, out, width, height, stride_fg, stride_bg, stride_mask,
+                    fg,
+                    bg,
+                    mask,
+                    out,
+                    width,
+                    height,
+                    stride_fg,
+                    stride_bg,
+                    stride_mask,
                     stride_out,
                 )
             };
@@ -443,7 +470,15 @@ pub fn blend_bgra(
         {
             return unsafe {
                 blend_bgra_avx2(
-                    fg, bg, mask, out, width, height, stride_fg, stride_bg, stride_mask,
+                    fg,
+                    bg,
+                    mask,
+                    out,
+                    width,
+                    height,
+                    stride_fg,
+                    stride_bg,
+                    stride_mask,
                     stride_out,
                 )
             };
@@ -454,13 +489,31 @@ pub fn blend_bgra(
     {
         if tier == SimdTier::Neon || tier == SimdTier::Auto {
             return blend_bgra_neon(
-                fg, bg, mask, out, width, height, stride_fg, stride_bg, stride_mask, stride_out,
+                fg,
+                bg,
+                mask,
+                out,
+                width,
+                height,
+                stride_fg,
+                stride_bg,
+                stride_mask,
+                stride_out,
             );
         }
     }
 
     blend_bgra_scalar(
-        fg, bg, mask, out, width, height, stride_fg, stride_bg, stride_mask, stride_out,
+        fg,
+        bg,
+        mask,
+        out,
+        width,
+        height,
+        stride_fg,
+        stride_bg,
+        stride_mask,
+        stride_out,
     )
 }
 
@@ -510,11 +563,14 @@ pub fn generate_blurred_bg_scalar(
             let left_x = (x as i32 - r).max(0) as usize;
             let right_x = (x as i32 + r + 1).min((w as i32) - 1) as usize;
 
-            sum0 = sum0.wrapping_add(src_row[right_x * 4 + 0] as u32)
+            sum0 = sum0
+                .wrapping_add(src_row[right_x * 4 + 0] as u32)
                 .wrapping_sub(src_row[left_x * 4 + 0] as u32);
-            sum1 = sum1.wrapping_add(src_row[right_x * 4 + 1] as u32)
+            sum1 = sum1
+                .wrapping_add(src_row[right_x * 4 + 1] as u32)
                 .wrapping_sub(src_row[left_x * 4 + 1] as u32);
-            sum2 = sum2.wrapping_add(src_row[right_x * 4 + 2] as u32)
+            sum2 = sum2
+                .wrapping_add(src_row[right_x * 4 + 2] as u32)
                 .wrapping_sub(src_row[left_x * 4 + 2] as u32);
         }
     }
@@ -546,11 +602,14 @@ pub fn generate_blurred_bg_scalar(
             let top_off = (top_y * w + x) * 4;
             let bot_off = (bot_y * w + x) * 4;
 
-            sum0 = sum0.wrapping_add(temp[bot_off + 0] as u32)
+            sum0 = sum0
+                .wrapping_add(temp[bot_off + 0] as u32)
                 .wrapping_sub(temp[top_off + 0] as u32);
-            sum1 = sum1.wrapping_add(temp[bot_off + 1] as u32)
+            sum1 = sum1
+                .wrapping_add(temp[bot_off + 1] as u32)
                 .wrapping_sub(temp[top_off + 1] as u32);
-            sum2 = sum2.wrapping_add(temp[bot_off + 2] as u32)
+            sum2 = sum2
+                .wrapping_add(temp[bot_off + 2] as u32)
                 .wrapping_sub(temp[top_off + 2] as u32);
         }
     }
@@ -608,16 +667,12 @@ pub fn generate_blurred_bg(
             && std::arch::is_x86_feature_detected!("avx512f")
             && std::arch::is_x86_feature_detected!("avx512bw")
         {
-            return unsafe {
-                generate_blurred_bg_avx512(src, dst, width, height, stride, radius)
-            };
+            return unsafe { generate_blurred_bg_avx512(src, dst, width, height, stride, radius) };
         }
         if (tier == SimdTier::Avx2 || tier == SimdTier::Avx512)
             && std::arch::is_x86_feature_detected!("avx2")
         {
-            return unsafe {
-                generate_blurred_bg_avx2(src, dst, width, height, stride, radius)
-            };
+            return unsafe { generate_blurred_bg_avx2(src, dst, width, height, stride, radius) };
         }
     }
 

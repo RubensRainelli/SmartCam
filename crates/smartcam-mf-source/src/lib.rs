@@ -30,8 +30,8 @@ pub mod stream;
 
 pub use smartcam_capture::{
     SharedFrameHeader, DEFAULT_SHARED_EVENT_NAME, DEFAULT_SHARED_MAPPING_NAME,
-    MAX_SHARED_FRAME_BYTES, SHARED_FRAME_HEADER_BYTES, SHARED_FRAME_MAGIC,
-    SHARED_FRAME_VERSION, SMARTCAM_MF_CLSID_STR, TOTAL_SHARED_FRAME_BYTES,
+    MAX_SHARED_FRAME_BYTES, SHARED_FRAME_HEADER_BYTES, SHARED_FRAME_MAGIC, SHARED_FRAME_VERSION,
+    SMARTCAM_MF_CLSID_STR, TOTAL_SHARED_FRAME_BYTES,
 };
 
 #[cfg(windows)]
@@ -49,13 +49,14 @@ pub use stream::*;
 mod tests {
     use super::*;
     use std::mem::{align_of, size_of};
+    #[cfg(windows)]
     use windows::{
-        core::{Interface, IUnknown},
+        core::{IUnknown, Interface},
         Win32::{
             Foundation::S_OK,
             Media::MediaFoundation::{
-                IMFMediaEventGenerator, IMFMediaSource, IMFMediaSourceEx,
-                MFMEDIASOURCE_IS_LIVE, MFShutdown, MFStartup, MF_VERSION,
+                IMFMediaEventGenerator, IMFMediaSource, IMFMediaSourceEx, MFShutdown, MFStartup,
+                MFMEDIASOURCE_IS_LIVE, MF_VERSION,
             },
             System::Com::{CoInitializeEx, CoUninitialize, IClassFactory, COINIT_MULTITHREADED},
         },
@@ -101,34 +102,40 @@ mod tests {
             assert_eq!(p_res - base, 72, "reserved offset");
         }
 
-        // Test frame written by smartcam-capture producer is read back identically by mf-source consumer
-        let map_name = format!(r"Local\SmartCam_MfSourceTest_{}", std::process::id());
-        let ev_name = format!(r"Local\SmartCam_MfSourceEv_{}", std::process::id());
+        #[cfg(windows)]
+        {
+            // Test frame written by smartcam-capture producer is read back identically by mf-source consumer
+            let map_name = format!(r"Local\SmartCam_MfSourceTest_{}", std::process::id());
+            let ev_name = format!(r"Local\SmartCam_MfSourceEv_{}", std::process::id());
 
-        let producer = smartcam_capture::SharedFrameIpc::open_or_create(&map_name, &ev_name, true)
-            .expect("open producer");
-        let consumer = smartcam_capture::SharedFrameIpc::open_or_create(&map_name, &ev_name, false)
-            .expect("open consumer");
+            let producer =
+                smartcam_capture::SharedFrameIpc::open_or_create(&map_name, &ev_name, true)
+                    .expect("open producer");
+            let consumer =
+                smartcam_capture::SharedFrameIpc::open_or_create(&map_name, &ev_name, false)
+                    .expect("open consumer");
 
-        let (width, height) = (32u32, 16u32);
-        let pixels: Vec<u8> = (0..(width * height * 4) as usize)
-            .map(|i| (i * 7 % 256) as u8)
-            .collect();
+            let (width, height) = (32u32, 16u32);
+            let pixels: Vec<u8> = (0..(width * height * 4) as usize)
+                .map(|i| (i * 7 % 256) as u8)
+                .collect();
 
-        assert!(producer.write_frame(&pixels, width, height, width * 4, 30, 1, 9876543210, 42));
+            assert!(producer.write_frame(&pixels, width, height, width * 4, 30, 1, 9876543210, 42));
 
-        let mut read_buf = vec![0u8; (width * height * 4) as usize];
-        let mut r_w = 0u32;
-        let mut r_h = 0u32;
-        let mut r_ts = 0u64;
+            let mut read_buf = vec![0u8; (width * height * 4) as usize];
+            let mut r_w = 0u32;
+            let mut r_h = 0u32;
+            let mut r_ts = 0u64;
 
-        assert!(consumer.read_frame(&mut read_buf, &mut r_w, &mut r_h, &mut r_ts));
-        assert_eq!(r_w, width);
-        assert_eq!(r_h, height);
-        assert_eq!(r_ts, 9876543210);
-        assert_eq!(read_buf, pixels);
+            assert!(consumer.read_frame(&mut read_buf, &mut r_w, &mut r_h, &mut r_ts));
+            assert_eq!(r_w, width);
+            assert_eq!(r_h, height);
+            assert_eq!(r_ts, 9876543210);
+            assert_eq!(read_buf, pixels);
+        }
     }
 
+    #[cfg(windows)]
     #[test]
     fn test_dll_get_class_object_and_com_interfaces() {
         unsafe {
@@ -148,26 +155,51 @@ mod tests {
             let factory: IClassFactory = IClassFactory::from_raw(factory_ptr);
 
             // 2. Calling CreateInstance returns a valid COM object
-            let unk: IUnknown = factory.CreateInstance(None).expect("CreateInstance must succeed");
+            let unk: IUnknown = factory
+                .CreateInstance(None)
+                .expect("CreateInstance must succeed");
 
             // 3. Responds to QueryInterface: IMFMediaSource
-            let source: IMFMediaSource = unk.cast().expect("QueryInterface for IMFMediaSource must succeed");
+            let source: IMFMediaSource = unk
+                .cast()
+                .expect("QueryInterface for IMFMediaSource must succeed");
 
             // 4. Responds to QueryInterface: IMFMediaSourceEx
-            let source_ex: IMFMediaSourceEx = unk.cast().expect("QueryInterface for IMFMediaSourceEx must succeed");
-            assert_eq!(source_ex.GetCharacteristics().expect("GetCharacteristics on source_ex"), MFMEDIASOURCE_IS_LIVE.0 as u32);
+            let source_ex: IMFMediaSourceEx = unk
+                .cast()
+                .expect("QueryInterface for IMFMediaSourceEx must succeed");
+            assert_eq!(
+                source_ex
+                    .GetCharacteristics()
+                    .expect("GetCharacteristics on source_ex"),
+                MFMEDIASOURCE_IS_LIVE.0 as u32
+            );
 
             // 5. Responds to QueryInterface: IMFMediaEventGenerator
-            let _: IMFMediaEventGenerator = unk.cast().expect("QueryInterface for IMFMediaEventGenerator must succeed");
+            let _: IMFMediaEventGenerator = unk
+                .cast()
+                .expect("QueryInterface for IMFMediaEventGenerator must succeed");
 
             // 6. Supports GetCharacteristics(MFMEDIASOURCE_IS_LIVE)
-            let chars = source.GetCharacteristics().expect("GetCharacteristics must succeed");
-            assert_eq!(chars, MFMEDIASOURCE_IS_LIVE.0 as u32, "Characteristics must be MFMEDIASOURCE_IS_LIVE");
+            let chars = source
+                .GetCharacteristics()
+                .expect("GetCharacteristics must succeed");
+            assert_eq!(
+                chars, MFMEDIASOURCE_IS_LIVE.0 as u32,
+                "Characteristics must be MFMEDIASOURCE_IS_LIVE"
+            );
 
             // 7. Supports CreatePresentationDescriptor
-            let pres_desc = source.CreatePresentationDescriptor().expect("CreatePresentationDescriptor must succeed");
-            let stream_count = pres_desc.GetStreamDescriptorCount().expect("GetStreamDescriptorCount must succeed");
-            assert_eq!(stream_count, 1, "Virtual camera must have exactly 1 stream descriptor");
+            let pres_desc = source
+                .CreatePresentationDescriptor()
+                .expect("CreatePresentationDescriptor must succeed");
+            let stream_count = pres_desc
+                .GetStreamDescriptorCount()
+                .expect("GetStreamDescriptorCount must succeed");
+            assert_eq!(
+                stream_count, 1,
+                "Virtual camera must have exactly 1 stream descriptor"
+            );
 
             // Clean shutdown
             let _ = source.Shutdown();

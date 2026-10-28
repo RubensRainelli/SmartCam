@@ -20,13 +20,12 @@ use windows::{
         Foundation::{E_POINTER, S_OK},
         Media::MediaFoundation::{
             IMFAsyncCallback, IMFAsyncResult, IMFAttributes, IMFMediaBuffer, IMFMediaEvent,
-            IMFMediaEventGenerator_Impl, IMFMediaEventQueue, IMFMediaSource,
-            IMFMediaStream, IMFMediaStream_Impl, IMFStreamDescriptor,
-            MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS, MEMediaSample, MEStreamPaused,
+            IMFMediaEventGenerator_Impl, IMFMediaEventQueue, IMFMediaSource, IMFMediaStream,
+            IMFMediaStream_Impl, IMFStreamDescriptor, MEMediaSample, MEStreamPaused,
             MEStreamStarted, MEStreamStopped, MFCreateAttributes, MFCreateEventQueue,
-            MFCreateMemoryBuffer, MFCreateSample, MFSampleExtension_Token, MF_E_SHUTDOWN,
-            MF_DEVICESTREAM_FRAMESERVER_SHARED, MF_DEVICESTREAM_STREAM_CATEGORY,
-            MF_DEVICESTREAM_STREAM_ID,
+            MFCreateMemoryBuffer, MFCreateSample, MFSampleExtension_Token,
+            MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS, MF_DEVICESTREAM_FRAMESERVER_SHARED,
+            MF_DEVICESTREAM_STREAM_CATEGORY, MF_DEVICESTREAM_STREAM_ID, MF_E_SHUTDOWN,
         },
         System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency},
     },
@@ -34,8 +33,8 @@ use windows::{
 use windows_core::PROPVARIANT;
 
 use smartcam_capture::{
-    SharedFrameIpc, DEFAULT_SHARED_EVENT_NAME, DEFAULT_SHARED_MAPPING_NAME,
-    MAX_SHARED_FRAME_BYTES, SHARED_FRAME_MAGIC,
+    SharedFrameIpc, DEFAULT_SHARED_EVENT_NAME, DEFAULT_SHARED_MAPPING_NAME, MAX_SHARED_FRAME_BYTES,
+    SHARED_FRAME_MAGIC,
 };
 
 use crate::constants::{
@@ -62,6 +61,9 @@ pub struct SmartCamMfMediaStream {
     inner: Arc<Mutex<StreamInner>>,
 }
 
+unsafe impl Send for StreamInner {}
+unsafe impl Sync for StreamInner {}
+
 impl SmartCamMfMediaStream {
     pub fn new(
         parent_source: Option<IMFMediaSource>,
@@ -73,7 +75,8 @@ impl SmartCamMfMediaStream {
         unsafe {
             MFCreateAttributes(&mut stream_attributes, 4)?;
         }
-        let stream_attributes = stream_attributes.ok_or_else(|| windows::core::Error::from_hresult(E_POINTER))?;
+        let stream_attributes =
+            stream_attributes.ok_or_else(|| windows::core::Error::from_hresult(E_POINTER))?;
 
         unsafe {
             stream_attributes.SetGUID(&MF_DEVICESTREAM_STREAM_CATEGORY, &PINNAME_VIDEO_CAPTURE)?;
@@ -206,7 +209,7 @@ impl IMFMediaEventGenerator_Impl for SmartCamMfMediaStream_Impl {
             }
             inner.event_queue.clone()
         };
-        unsafe { queue.GetEvent(dwflags.0 as u32) }
+        unsafe { queue.GetEvent(dwflags.0) }
     }
 
     fn BeginGetEvent(
@@ -320,7 +323,9 @@ impl IMFMediaStream_Impl for SmartCamMfMediaStream_Impl {
                     let mut r_ts = 0u64;
 
                     if hdr.width == width && hdr.height == height {
-                        let dst_slice = unsafe { std::slice::from_raw_parts_mut(raw_ptr, buffer_size as usize) };
+                        let dst_slice = unsafe {
+                            std::slice::from_raw_parts_mut(raw_ptr, buffer_size as usize)
+                        };
                         if ipc_ref.read_frame(dst_slice, &mut r_w, &mut r_h, &mut r_ts) {
                             got_ipc_frame = true;
                             ts_100ns = r_ts;
@@ -331,15 +336,23 @@ impl IMFMediaStream_Impl for SmartCamMfMediaStream_Impl {
                             if scratch_buf.len() < src_bytes {
                                 scratch_buf.resize(src_bytes, 0);
                             }
-                            if ipc_ref.read_frame(&mut scratch_buf[..src_bytes], &mut r_w, &mut r_h, &mut r_ts)
-                                && r_w > 0
+                            if ipc_ref.read_frame(
+                                &mut scratch_buf[..src_bytes],
+                                &mut r_w,
+                                &mut r_h,
+                                &mut r_ts,
+                            ) && r_w > 0
                                 && r_h > 0
                             {
                                 // Rescale row-by-row into destination buffer
                                 for dy in 0..height {
                                     let sy = (dy * r_h) / height;
-                                    let dst_row = unsafe { raw_ptr.add((dy as usize) * (width as usize) * 4) };
-                                    let src_row = unsafe { scratch_buf.as_ptr().add((sy as usize) * (r_w as usize) * 4) };
+                                    let dst_row = unsafe {
+                                        raw_ptr.add((dy as usize) * (width as usize) * 4)
+                                    };
+                                    let src_row = unsafe {
+                                        scratch_buf.as_ptr().add((sy as usize) * (r_w as usize) * 4)
+                                    };
                                     for dx in 0..width {
                                         let sx = (dx * r_w) / width;
                                         unsafe {
@@ -394,12 +407,7 @@ impl IMFMediaStream_Impl for SmartCamMfMediaStream_Impl {
 
         *sample_count += 1;
         unsafe {
-            event_queue.QueueEventParamUnk(
-                MEMediaSample.0 as u32,
-                &GUID::zeroed(),
-                S_OK,
-                &sample,
-            )
+            event_queue.QueueEventParamUnk(MEMediaSample.0 as u32, &GUID::zeroed(), S_OK, &sample)
         }
     }
 }

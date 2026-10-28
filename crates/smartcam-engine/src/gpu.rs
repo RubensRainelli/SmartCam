@@ -215,7 +215,12 @@ impl GpuAccelerator {
             } else {
                 "Driver Vulkan non presente".to_string()
             },
-            driver_version: if vk_available { "Vulkan Runtime 1.3" } else { "N/A" }.to_string(),
+            driver_version: if vk_available {
+                "Vulkan Runtime 1.3"
+            } else {
+                "N/A"
+            }
+            .to_string(),
             vram_bytes: if vk_available { 2048 * 1024 * 1024 } else { 0 },
             compute_units: if vk_available { 64 } else { 0 },
             available: vk_available,
@@ -261,8 +266,17 @@ impl GpuAccelerator {
             } else {
                 "Driver NVIDIA CUDA non presente".to_string()
             },
-            driver_version: if cuda_available { "CUDA Driver API" } else { "N/A" }.to_string(),
-            vram_bytes: if cuda_available { 4096 * 1024 * 1024 } else { 0 },
+            driver_version: if cuda_available {
+                "CUDA Driver API"
+            } else {
+                "N/A"
+            }
+            .to_string(),
+            vram_bytes: if cuda_available {
+                4096 * 1024 * 1024
+            } else {
+                0
+            },
             compute_units: if cuda_available { 128 } else { 0 },
             available: cuda_available,
             is_integrated: false,
@@ -284,8 +298,17 @@ impl GpuAccelerator {
             } else {
                 "Driver AMD ROCm non presente".to_string()
             },
-            driver_version: if rocm_available { "ROCm/HIP Runtime" } else { "N/A" }.to_string(),
-            vram_bytes: if rocm_available { 4096 * 1024 * 1024 } else { 0 },
+            driver_version: if rocm_available {
+                "ROCm/HIP Runtime"
+            } else {
+                "N/A"
+            }
+            .to_string(),
+            vram_bytes: if rocm_available {
+                4096 * 1024 * 1024
+            } else {
+                0
+            },
             compute_units: if rocm_available { 64 } else { 0 },
             available: rocm_available,
             is_integrated: is_igpu,
@@ -405,7 +428,16 @@ impl GpuAccelerator {
         let t0 = Instant::now();
         for _ in 0..iters {
             crate::compositor::blend_bgra_scalar(
-                &fg, &bg, &mask, &mut out, w, h, w * 4, w * 4, w, w * 4,
+                &fg,
+                &bg,
+                &mask,
+                &mut out,
+                w,
+                h,
+                w * 4,
+                w * 4,
+                w,
+                w * 4,
             );
         }
         let scalar_ms = (t0.elapsed().as_secs_f32() * 1000.0) / (iters as f32);
@@ -429,7 +461,16 @@ impl GpuAccelerator {
                 for _ in 0..iters {
                     unsafe {
                         crate::compositor::blend_bgra_avx2(
-                            &fg, &bg, &mask, &mut out, w, h, w * 4, w * 4, w, w * 4,
+                            &fg,
+                            &bg,
+                            &mask,
+                            &mut out,
+                            w,
+                            h,
+                            w * 4,
+                            w * 4,
+                            w,
+                            w * 4,
                         );
                     }
                 }
@@ -457,7 +498,16 @@ impl GpuAccelerator {
                 for _ in 0..iters {
                     unsafe {
                         crate::compositor::blend_bgra_avx512(
-                            &fg, &bg, &mask, &mut out, w, h, w * 4, w * 4, w, w * 4,
+                            &fg,
+                            &bg,
+                            &mask,
+                            &mut out,
+                            w,
+                            h,
+                            w * 4,
+                            w * 4,
+                            w,
+                            w * 4,
                         );
                     }
                 }

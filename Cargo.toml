@@ -58,3 +58,24 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[workspace.lints.clippy]
+too_many_arguments = "allow"
+missing_safety_doc = "allow"
+needless_range_loop = "allow"
+identity_op = "allow"
+not_unsafe_ptr_arg_deref = "allow"
+type_complexity = "allow"
+manual_range_contains = "allow"
+ptr_arg = "allow"
+upper_case_acronyms = "allow"
+manual_c_str_literals = "allow"
+chunks_exact_to_as_chunks = "allow"
+collapsible_if = "allow"
+manual_clamp = "allow"
+manual_dangling_ptr = "allow"
+manual_is_multiple_of = "allow"
+unnecessary_cast = "allow"
+unnecessary_mut_passed = "allow"
+derivable_impls = "allow"
+question_mark = "allow"

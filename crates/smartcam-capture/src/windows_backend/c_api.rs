@@ -177,7 +177,11 @@ pub unsafe extern "C" fn smartcam_win_sink_init(
         "SmartCam".to_string()
     };
     let cfg = VirtualCameraSinkConfig {
-        friendly_name: if name_str.is_empty() { "SmartCam".to_string() } else { name_str },
+        friendly_name: if name_str.is_empty() {
+            "SmartCam".to_string()
+        } else {
+            name_str
+        },
         shared_memory_name: crate::header::DEFAULT_SHARED_MAPPING_NAME.to_string(),
         width: if width > 0 { width } else { 1440 },
         height: if height > 0 { height } else { 1080 },
