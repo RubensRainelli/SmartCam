@@ -103,6 +103,7 @@ pub(crate) enum UiAction {
     ApplyBenchmarkProfile(usize),
     // PEFL v1.0 Mandatory Clause 3 Foreground Modal Actions
     PeflToggleRemember,
+    PeflSetRemember(bool),
     PeflOpenFullLicense,
     PeflAccept,
     PeflReject,
@@ -1313,6 +1314,9 @@ impl AppGuiState {
             }
             UiAction::PeflToggleRemember => {
                 self.pefl_remember_7_days = !self.pefl_remember_7_days;
+            }
+            UiAction::PeflSetRemember(val) => {
+                self.pefl_remember_7_days = val;
             }
             UiAction::PeflOpenFullLicense => {
                 let lic_it = self.repo_root.join("LICENSE.it");
@@ -5587,13 +5591,28 @@ unsafe fn paint_pefl_modal_overlay(
     register_button(
         hdc,
         app,
-        RECT::new(x0 + 24, y0 + 440, x0 + w_box - 24, y0 + 476),
+        RECT::new(x0 + 24, y0 + 440, x0 + 566, y0 + 476),
         if app.pefl_remember_7_days {
             "☑ Ricorda la mia approvazione della licenza PEFL v1.0 per i prossimi 7 giorni su questo PC"
         } else {
             "☐ Ricorda la mia approvazione della licenza PEFL v1.0 per i prossimi 7 giorni su questo PC (Chiedi a ogni avvio)"
         },
-        UiAction::PeflToggleRemember,
+        UiAction::PeflSetRemember(true),
+        app.pefl_remember_7_days,
+        rgb(22, 163, 74),
+        f_btn,
+    );
+    register_button(
+        hdc,
+        app,
+        RECT::new(x0 + 576, y0 + 440, x0 + w_box - 24, y0 + 476),
+        "⏱️ Solo per questa sessione",
+        UiAction::PeflSetRemember(false),
+        !app.pefl_remember_7_days,
+        rgb(71, 85, 105),
+        f_small,
+    );
+    let _ = (
         app.pefl_remember_7_days,
         rgb(3, 105, 161),
         f_btn,

@@ -41,10 +41,25 @@ use crate::{
 
 static MODULE_HANDLE: AtomicUsize = AtomicUsize::new(0);
 
-const FRIENDLY_NAME: &str = "SmartCam Virtual Camera";
+const FRIENDLY_NAME: &str = "SmartCam";
 const CLSID_STR: &str = "{9D4B8E71-3F5A-4E9C-A8B2-71C9D0E54F21}";
+const LEGACY_DSHOW_CATEGORY_STR: &str = "{860BB310-5D01-11d0-BD3B-00A0C911CE86}";
+
+unsafe fn cleanup_legacy_keys(root: HKEY) {
+    let legacy_dshow_inst = format!(
+        "SOFTWARE\\Classes\\CLSID\\{}\\Instance\\{}",
+        LEGACY_DSHOW_CATEGORY_STR, CLSID_STR
+    );
+    let wide_legacy: Vec<u16> = legacy_dshow_inst
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let _ = RegDeleteKeyW(root, PCWSTR(wide_legacy.as_ptr()));
+}
 
 unsafe fn register_in_root_hive(root: HKEY, module_path: &[u16]) -> bool {
+    cleanup_legacy_keys(root);
+
     let clsid_key = format!("SOFTWARE\\Classes\\CLSID\\{}", CLSID_STR);
     let inproc_key = format!("SOFTWARE\\Classes\\CLSID\\{}\\InprocServer32", CLSID_STR);
 
@@ -55,6 +70,10 @@ unsafe fn register_in_root_hive(root: HKEY, module_path: &[u16]) -> bool {
         .collect();
 
     let wide_desc: Vec<u16> = FRIENDLY_NAME
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let wide_fn_val: Vec<u16> = "FriendlyName"
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
@@ -83,6 +102,16 @@ unsafe fn register_in_root_hive(root: HKEY, module_path: &[u16]) -> bool {
     let _ = RegSetValueExW(
         hkey,
         PCWSTR::null(),
+        0,
+        REG_SZ,
+        Some(std::slice::from_raw_parts(
+            wide_desc.as_ptr() as *const u8,
+            wide_desc.len() * 2,
+        )),
+    );
+    let _ = RegSetValueExW(
+        hkey,
+        PCWSTR(wide_fn_val.as_ptr()),
         0,
         REG_SZ,
         Some(std::slice::from_raw_parts(
@@ -135,6 +164,7 @@ unsafe fn register_in_root_hive(root: HKEY, module_path: &[u16]) -> bool {
 }
 
 unsafe fn unregister_from_root_hive(root: HKEY) {
+    cleanup_legacy_keys(root);
     let inproc_key = format!("SOFTWARE\\Classes\\CLSID\\{}\\InprocServer32", CLSID_STR);
     let clsid_key = format!("SOFTWARE\\Classes\\CLSID\\{}", CLSID_STR);
 

@@ -27,26 +27,148 @@ fn current_unix_timestamp() -> u64 {
         .unwrap_or(0)
 }
 
+fn push_unique_path(paths: &mut Vec<PathBuf>, p: PathBuf) {
+    if !paths.contains(&p) {
+        paths.push(p);
+    }
+}
+
 pub fn pefl_cache_candidates(repo_root: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    paths.push(repo_root.join(".pefl_accepted_SmartCam"));
+
+    if let Ok(local_appdata) = std::env::var("LOCALAPPDATA") {
+        let dir = PathBuf::from(local_appdata).join("SmartCam");
+        let _ = fs::create_dir_all(&dir);
+        push_unique_path(&mut paths, dir.join(".pefl_accepted_SmartCam"));
+    }
+
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let dir = PathBuf::from(appdata).join("SmartCam");
+        let _ = fs::create_dir_all(&dir);
+        push_unique_path(&mut paths, dir.join(".pefl_accepted_SmartCam"));
+    }
+
+    let public_dir = PathBuf::from(r"C:\Users\Public\SmartCam");
+    let _ = fs::create_dir_all(&public_dir);
+    push_unique_path(&mut paths, public_dir.join(".pefl_accepted_SmartCam"));
+
+    push_unique_path(&mut paths, repo_root.join(".pefl_accepted_SmartCam"));
+
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let p = dir.join(".pefl_accepted_SmartCam");
-            if !paths.contains(&p) {
-                paths.push(p);
-            }
+            push_unique_path(&mut paths, dir.join(".pefl_accepted_SmartCam"));
         }
     }
+
     paths
+}
+
+#[cfg(target_os = "windows")]
+fn read_registry_pefl_timestamp() -> Option<u64> {
+    use crate::win32_ffi::{
+        to_wstring, RegCloseKey, RegOpenKeyExW, RegQueryValueExW, DWORD, HKEY, HKEY_CURRENT_USER,
+        KEY_READ, NULL, REG_SZ,
+    };
+
+    unsafe {
+        let subkey = to_wstring(r"Software\SmartCam");
+        let val_name = to_wstring("PeflAcceptedTimestamp");
+        let mut hkey: HKEY = NULL;
+        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ, &mut hkey) != 0
+            || hkey.is_null()
+        {
+            return None;
+        }
+        let mut buf = [0u16; 64];
+        let mut buf_bytes: DWORD = (buf.len() * 2) as DWORD;
+        let mut reg_type: DWORD = 0;
+        let status = RegQueryValueExW(
+            hkey,
+            val_name.as_ptr(),
+             std::ptr::null_mut(),
+            &mut reg_type,
+            buf.as_mut_ptr() as *mut u8,
+            &mut buf_bytes,
+        );
+        RegCloseKey(hkey);
+        if status == 0 && reg_type == REG_SZ && buf_bytes >= 2 {
+            let len = (buf_bytes as usize / 2).saturating_sub(1);
+            let s = String::from_utf16_lossy(&buf[..len]);
+            return s.trim_matches('\0').trim().parse::<u64>().ok();
+        }
+        None
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn write_registry_pefl_timestamp(timestamp_opt: Option<u64>) {
+    use crate::win32_ffi::{
+        to_wstring, RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegSetValueExW, DWORD, HKEY,
+        HKEY_CURRENT_USER, KEY_WRITE, NULL, REG_SZ,
+    };
+
+    unsafe {
+        let subkey = to_wstring(r"Software\SmartCam");
+        let val_name = to_wstring("PeflAcceptedTimestamp");
+        let mut hkey: HKEY = NULL;
+        let mut disp: DWORD = 0;
+        if RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            subkey.as_ptr(),
+            0,
+             std::ptr::null_mut(),
+            0,
+            KEY_WRITE,
+            std::ptr::null_mut(),
+            &mut hkey,
+            &mut disp,
+        ) != 0
+            || hkey.is_null()
+        {
+            return;
+        }
+
+        if let Some(ts) = timestamp_opt {
+            let s = ts.to_string();
+            let wide = to_wstring(&s);
+            let _ = RegSetValueExW(
+                hkey,
+                val_name.as_ptr(),
+                0,
+                REG_SZ,
+                wide.as_ptr() as *const u8,
+                (wide.len() * 2) as DWORD,
+            );
+        } else {
+            let _ = RegDeleteValueW(hkey, val_name.as_ptr());
+        }
+        RegCloseKey(hkey);
+    }
+}
+
+fn is_timestamp_valid(ts: u64, now: u64) -> bool {
+    if now >= ts {
+        (now - ts) < SEVEN_DAYS_SECONDS
+    } else {
+        // Tolerate minor system clock adjustments
+        (ts - now) < 3600
+    }
 }
 
 pub fn is_pefl_accepted(repo_root: &Path) -> bool {
     let now = current_unix_timestamp();
+
+    #[cfg(target_os = "windows")]
+    if let Some(ts) = read_registry_pefl_timestamp() {
+        if is_timestamp_valid(ts, now) {
+            return true;
+        }
+    }
+
     for path in pefl_cache_candidates(repo_root) {
         if let Ok(content) = fs::read_to_string(&path) {
             if let Ok(ts) = content.trim().parse::<u64>() {
-                if now >= ts && (now - ts) < SEVEN_DAYS_SECONDS {
+                if is_timestamp_valid(ts, now) {
                     return true;
                 }
             }
@@ -56,7 +178,9 @@ pub fn is_pefl_accepted(repo_root: &Path) -> bool {
 }
 
 pub fn save_pefl_acceptance(repo_root: &Path, remember_7_days: bool) {
-    let now_str = current_unix_timestamp().to_string();
+    let now = current_unix_timestamp();
+    let now_str = now.to_string();
+
     // Always remove any legacy .exe-suffixed cache file if present
     let _ = fs::remove_file(repo_root.join(".pefl_accepted_SmartCam.exe"));
     if let Ok(exe) = std::env::current_exe() {
@@ -65,8 +189,14 @@ pub fn save_pefl_acceptance(repo_root: &Path, remember_7_days: bool) {
         }
     }
 
+    #[cfg(target_os = "windows")]
+    write_registry_pefl_timestamp(if remember_7_days { Some(now) } else { None });
+
     for path in pefl_cache_candidates(repo_root) {
         if remember_7_days {
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
             let _ = fs::write(&path, &now_str);
         } else {
             let _ = fs::remove_file(&path);
@@ -112,4 +242,30 @@ pub fn check_pefl_cli(repo_root: &Path) -> bool {
     let remember = r == "y" || r == "yes" || r == "s" || r == "si";
     save_pefl_acceptance(repo_root, remember);
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pefl_acceptance_persists_across_readonly_or_custom_dirs() {
+        // Simulate a directory path that does not exist / cannot be written directly
+        let non_writable_root = PathBuf::from(r"C:\Program Files\SmartCam_NonExistent_Test_Dir");
+        save_pefl_acceptance(&non_writable_root, true);
+        assert!(
+            is_pefl_accepted(&non_writable_root),
+            "PEFL 7-day acceptance must persist via user-writable AppData/Registry even when install dir is read-only"
+        );
+
+        save_pefl_acceptance(&non_writable_root, false);
+        assert!(
+            !is_pefl_accepted(&non_writable_root),
+            "Clearing PEFL acceptance must reset state to false"
+        );
+
+        // Restore accepted state for normal user convenience after test
+        save_pefl_acceptance(&non_writable_root, true);
+        assert!(is_pefl_accepted(&non_writable_root));
+    }
 }

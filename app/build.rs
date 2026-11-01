@@ -101,7 +101,7 @@ fn main() {
         res.set("ProductName", "SmartCam");
         res.set(
             "FileDescription",
-            "SmartCam v2.0.0 — Pure Rust Studio Virtual Camera",
+            "SmartCam",
         );
         res.set("CompanyName", "Rubens Rainelli");
         res.set(

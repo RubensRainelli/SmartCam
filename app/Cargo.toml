@@ -16,7 +16,7 @@ name = "smartcam"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-description = "SmartCam v2.0 — Pure Rust Native Desktop Application & Media Foundation Virtual Camera (PEFL v1.0)"
+description = "SmartCam"
 license.workspace = true
 publish = false
 

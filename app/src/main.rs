@@ -105,6 +105,7 @@ fn print_help() {
 #[cfg(target_os = "windows")]
 fn main() {
     let repo_root = resolve_repo_root();
+    cleanup_stale_smartcam_registrations_and_privacy_entries(&repo_root);
     let mut config_path: PathBuf = repo_root.join("config").join("default_config.yaml");
 
     let args: Vec<String> = std::env::args().skip(1).collect();

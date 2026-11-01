@@ -13,6 +13,8 @@
  * The full license can be found in the LICENSE file.
  */
 
+#![allow(non_snake_case)]
+
 use windows::core::GUID;
 
 /// CLSID for SmartCam Windows Media Foundation Virtual Camera Source:
@@ -39,3 +41,40 @@ pub const DEFAULT_STREAM_FPS: u32 = 30;
 
 /// Default sample duration in 100-ns units (~33.33ms = 333,333 units).
 pub const DEFAULT_SAMPLE_DURATION_100NS: i64 = 333_333;
+
+/// HRESULT_FROM_WIN32(ERROR_SET_NOT_FOUND) = 0x80070490
+pub const HR_ERROR_SET_NOT_FOUND: windows_core::HRESULT =
+    windows_core::HRESULT(-2147023728i32);
+
+#[windows_core::interface("28F54685-06FD-11D2-B27A-00A0C9223196")]
+pub unsafe trait IKsControl: windows_core::IUnknown {
+    pub unsafe fn KsProperty(
+        &self,
+        property: *const core::ffi::c_void,
+        property_length: u32,
+        property_data: *mut core::ffi::c_void,
+        data_length: u32,
+        bytes_returned: *mut u32,
+    ) -> windows_core::HRESULT;
+
+    pub unsafe fn KsMethod(
+        &self,
+        method: *const core::ffi::c_void,
+        method_length: u32,
+        method_data: *mut core::ffi::c_void,
+        data_length: u32,
+        bytes_returned: *mut u32,
+    ) -> windows_core::HRESULT;
+
+    pub unsafe fn KsEvent(
+        &self,
+        event: *const core::ffi::c_void,
+        event_length: u32,
+        event_data: *mut core::ffi::c_void,
+        data_length: u32,
+        bytes_returned: *mut u32,
+    ) -> windows_core::HRESULT;
+}
+
+#[inline]
+pub fn trace_mf(_msg: &str) {}

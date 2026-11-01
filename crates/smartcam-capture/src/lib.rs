@@ -136,4 +136,150 @@ mod tests {
         // Verify consumer heartbeat
         assert!(producer.is_consumer_active(5000));
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_live_vcam_frameserver_and_source_reader_roundtrip() {
+        use std::ffi::c_void;
+        use windows::{
+            core::PWSTR,
+            Win32::{
+                Media::MediaFoundation::{
+                    IMFActivate, IMFMediaSource, MFCreateAttributes,
+                    MFCreateSourceReaderFromMediaSource, MFEnumDeviceSources,
+                    MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
+                    MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID,
+                    MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+                },
+                System::Com::CoTaskMemFree,
+            },
+        };
+
+        let mut sink = MfVirtualCameraSink::new();
+        assert!(sink.initialize(&VirtualCameraSinkConfig {
+            friendly_name: "SmartCam".to_string(),
+            shared_memory_name: DEFAULT_SHARED_MAPPING_NAME.to_string(),
+            width: 1440,
+            height: 1080,
+            fps: 30,
+        }));
+
+        let width = 1440u32;
+        let height = 1080u32;
+        let mut frame = vec![0u8; (width * height * 4) as usize];
+        for px in frame.chunks_exact_mut(4) {
+            px[0] = 42;  // B
+            px[1] = 188; // G
+            px[2] = 212; // R
+            px[3] = 255; // A
+        }
+        assert!(sink.push_frame(&frame, width, height, 30));
+
+        unsafe {
+            let mut attr = None;
+            MFCreateAttributes(&mut attr, 1).expect("MFCreateAttributes");
+            let attr = attr.unwrap();
+            attr.SetGUID(
+                &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
+                &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID,
+            )
+            .expect("SetGUID");
+
+            let mut pp_devices: *mut Option<IMFActivate> = std::ptr::null_mut();
+            let mut count = 0u32;
+            if MFEnumDeviceSources(&attr, &mut pp_devices, &mut count).is_ok()
+                && !pp_devices.is_null()
+            {
+                let activates = std::slice::from_raw_parts(pp_devices, count as usize);
+                let mut smartcam_activates = Vec::new();
+                for act in activates.iter().flatten() {
+                    let mut name_ptr = PWSTR::null();
+                    let mut name_len = 0u32;
+                    if act
+                        .GetAllocatedString(
+                            &MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
+                            &mut name_ptr,
+                            &mut name_len,
+                        )
+                        .is_ok()
+                        && !name_ptr.is_null()
+                    {
+                        let slice = std::slice::from_raw_parts(name_ptr.0, name_len as usize);
+                        let name = String::from_utf16_lossy(slice);
+                        CoTaskMemFree(Some(name_ptr.0 as *mut c_void));
+                        println!("[test_live_vcam] Enumerated device: {}", name);
+                        assert!(
+                            !name.contains("SmartCam Virtual Camera"),
+                            "Legacy 'SmartCam Virtual Camera' name must not exist"
+                        );
+                        if name == "SmartCam" || name.starts_with("SmartCam (") {
+                            smartcam_activates.push(act.clone());
+                        }
+                    }
+                }
+                CoTaskMemFree(Some(pp_devices as *mut c_void));
+
+                assert_eq!(
+                    smartcam_activates.len(),
+                    1,
+                    "Exactly 1 SmartCam virtual camera must be enumerated"
+                );
+                {
+                    let t0 = std::time::Instant::now();
+                    let vcam_source: IMFMediaSource = smartcam_activates[0]
+                        .ActivateObject()
+                        .expect("ActivateObject on SmartCam virtual camera");
+                    println!("[test_live_vcam] +{:?} ActivateObject done", t0.elapsed());
+                    let reader = MFCreateSourceReaderFromMediaSource(&vcam_source, None)
+                        .expect("MFCreateSourceReaderFromMediaSource on SmartCam");
+                    println!("[test_live_vcam] +{:?} MFCreateSourceReaderFromMediaSource done", t0.elapsed());
+
+                    let mut got_sample = None;
+                    for attempt in 1..=5 {
+                        println!("[test_live_vcam] +{:?} calling ReadSample #{}", t0.elapsed(), attempt);
+                        let mut actual_stream = 0u32;
+                        let mut flags = 0u32;
+                        let mut ts = 0i64;
+                        let mut sample = None;
+                        reader
+                            .ReadSample(
+                                MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32,
+                                0,
+                                Some(&mut actual_stream),
+                                Some(&mut flags),
+                                Some(&mut ts),
+                                Some(&mut sample),
+                            )
+                            .expect("IMFSourceReader::ReadSample from SmartCam");
+                        println!(
+                            "[test_live_vcam] +{:?} ReadSample #{}: stream={} flags=0x{:x} ts={} has_sample={}",
+                            t0.elapsed(),
+                            attempt,
+                            actual_stream,
+                            flags,
+                            ts,
+                            sample.is_some()
+                        );
+                        if sample.is_some() {
+                            got_sample = sample;
+                            break;
+                        }
+                    }
+                    let sample = got_sample.expect("ReadSample must return a non-null IMFSample");
+                    let buf = sample
+                        .ConvertToContiguousBuffer()
+                        .expect("ConvertToContiguousBuffer");
+                    let mut ptr = std::ptr::null_mut();
+                    let mut cur_len = 0u32;
+                    buf.Lock(&mut ptr, None, Some(&mut cur_len)).expect("Lock");
+                    assert_eq!(cur_len, width * height * 4);
+                    let rx = std::slice::from_raw_parts(ptr, 4);
+                    assert_eq!(rx, &[42, 188, 212, 255], "Live frame pixels must match SmartCam output!");
+                    let _ = buf.Unlock();
+                }
+            }
+        }
+
+        sink.shutdown();
+    }
 }

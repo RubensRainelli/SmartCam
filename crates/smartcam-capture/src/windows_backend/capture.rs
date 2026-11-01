@@ -15,19 +15,25 @@
 
 use std::ffi::c_void;
 use windows::{
-    core::{GUID, PWSTR},
+    core::{GUID, PCWSTR, PWSTR},
     Win32::{
         Media::MediaFoundation::{
             IMFActivate, IMFAttributes, IMFSourceReader, MFCreateAttributes, MFCreateMediaType,
             MFCreateSourceReaderFromMediaSource, MFEnumDeviceSources, MFMediaType_Video,
             MFShutdown, MFStartup, MFVideoFormat_RGB32, MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
-            MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID,
+            MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_CATEGORY,
+            MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID,
             MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK, MF_MT_FRAME_RATE,
             MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_SOURCE_READERF_ERROR,
             MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
             MF_VERSION,
         },
-        System::Com::{CoInitializeEx, CoTaskMemFree, CoUninitialize, COINIT_MULTITHREADED},
+        System::{
+            Com::{CoInitializeEx, CoTaskMemFree, CoUninitialize, COINIT_MULTITHREADED},
+            Registry::{
+                RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ,
+            },
+        },
     },
 };
 
@@ -36,6 +42,10 @@ use crate::{
     ir::is_ir_camera_name,
     types::{CameraCaptureConfig, CameraDeviceInfo, CameraSource},
 };
+
+/// `KSCATEGORY_SENSOR_CAMERA` (`{24E552D7-6523-47F7-A647-D3465BF1F5CA}`) used by Windows 10/11
+/// for Infrared / Windows Hello UVC cameras.
+const KSCATEGORY_SENSOR_CAMERA: GUID = GUID::from_u128(0x24E552D7_6523_47F7_A647_D3465BF1F5CA);
 
 pub fn mf_set_attribute_size(
     attrs: &IMFAttributes,
@@ -95,7 +105,188 @@ unsafe fn pwstr_to_string(pwstr: PWSTR) -> String {
     String::from_utf16_lossy(slice)
 }
 
-/// Lists all physical hardware video capture devices connected to the Windows system.
+/// Extracts the normalized PnP instance key `<bus>\<dev>\<inst>` from a Media Foundation symbolic link
+/// `\\?\<bus>#<dev>#<inst>#{<guid>}\...`.
+fn pnp_instance_key_from_symlink(symbolic_link: &str) -> Option<String> {
+    let trimmed = symbolic_link
+        .trim_start_matches(r"\\?\")
+        .trim_start_matches(r"\?\");
+    let parts: Vec<&str> = trimmed.split('#').collect();
+    if parts.len() >= 3 && !parts[0].is_empty() && !parts[1].is_empty() && !parts[2].is_empty() {
+        Some(format!(r"{}\{}\{}", parts[0], parts[1], parts[2]))
+    } else {
+        None
+    }
+}
+
+/// Resolves the hardware PnP `FriendlyName` (or `DeviceDesc`) from `HKLM\SYSTEM\CurrentControlSet\Enum\<bus>\<dev>\<inst>`
+/// when Media Foundation returns a generic placeholder like `"AvStream Media Device"` for sensor cameras.
+fn resolve_pnp_friendly_name(symbolic_link: &str) -> Option<String> {
+    let pnp_key = pnp_instance_key_from_symlink(symbolic_link)?;
+    let reg_path = format!(r"SYSTEM\CurrentControlSet\Enum\{}", pnp_key);
+    let wide_path: Vec<u16> = reg_path.encode_utf16().chain(std::iter::once(0)).collect();
+
+    unsafe {
+        let mut hkey = HKEY::default();
+        if RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            PCWSTR(wide_path.as_ptr()),
+            0,
+            KEY_READ,
+            &mut hkey,
+        )
+        .is_err()
+        {
+            return None;
+        }
+
+        let mut result = None;
+        for val_name in ["FriendlyName", "DeviceDesc"] {
+            let wide_val: Vec<u16> = val_name.encode_utf16().chain(std::iter::once(0)).collect();
+            let mut buf = [0u16; 256];
+            let mut byte_len = (buf.len() * 2) as u32;
+            if RegQueryValueExW(
+                hkey,
+                PCWSTR(wide_val.as_ptr()),
+                None,
+                None,
+                Some(buf.as_mut_ptr() as *mut u8),
+                Some(&mut byte_len),
+            )
+            .is_ok()
+                && byte_len >= 2
+            {
+                let u16_len = (byte_len as usize / 2).saturating_sub(1);
+                let raw = String::from_utf16_lossy(&buf[..u16_len])
+                    .trim_matches('\0')
+                    .trim()
+                    .to_string();
+                let cleaned = if let Some((_, after_semi)) = raw.rsplit_once(';') {
+                    after_semi.trim().to_string()
+                } else {
+                    raw
+                };
+                if !cleaned.is_empty() {
+                    result = Some(cleaned);
+                    break;
+                }
+            }
+        }
+
+        let _ = RegCloseKey(hkey);
+        result
+    }
+}
+
+unsafe fn collect_hardware_camera_activates() -> Vec<(IMFActivate, CameraDeviceInfo)> {
+    let mut results: Vec<(IMFActivate, CameraDeviceInfo)> = Vec::new();
+    let mut seen_keys: Vec<String> = Vec::new();
+
+    for (category_opt, is_sensor_cat) in [(None, false), (Some(KSCATEGORY_SENSOR_CAMERA), true)] {
+        let mut attr = None;
+        if MFCreateAttributes(&mut attr, 2).is_err() {
+            continue;
+        }
+        let Some(attr) = attr else {
+            continue;
+        };
+
+        let _ = attr.SetGUID(
+            &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
+            &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID,
+        );
+        if let Some(ref cat_guid) = category_opt {
+            let _ = attr.SetGUID(&MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_CATEGORY, cat_guid);
+        }
+
+        let mut pp_devices: *mut Option<IMFActivate> = std::ptr::null_mut();
+        let mut count = 0u32;
+
+        if MFEnumDeviceSources(&attr, &mut pp_devices, &mut count).is_ok() && !pp_devices.is_null() {
+            let activates = std::slice::from_raw_parts(pp_devices, count as usize);
+            for activate in activates.iter().flatten() {
+                let mut friendly_name = String::new();
+                let mut symbolic_link = String::new();
+
+                let mut name_ptr = PWSTR::null();
+                let mut name_len = 0u32;
+                if activate
+                    .GetAllocatedString(
+                        &MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
+                        &mut name_ptr,
+                        &mut name_len,
+                    )
+                    .is_ok()
+                    && !name_ptr.is_null()
+                {
+                    friendly_name = pwstr_to_string(name_ptr);
+                    CoTaskMemFree(Some(name_ptr.0 as *mut c_void));
+                }
+
+                let mut sym_ptr = PWSTR::null();
+                let mut sym_len = 0u32;
+                if activate
+                    .GetAllocatedString(
+                        &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
+                        &mut sym_ptr,
+                        &mut sym_len,
+                    )
+                    .is_ok()
+                    && !sym_ptr.is_null()
+                {
+                    symbolic_link = pwstr_to_string(sym_ptr);
+                    CoTaskMemFree(Some(sym_ptr.0 as *mut c_void));
+                }
+
+                if friendly_name.is_empty()
+                    || friendly_name.eq_ignore_ascii_case("AvStream Media Device")
+                {
+                    if let Some(pnp_name) = resolve_pnp_friendly_name(&symbolic_link) {
+                        friendly_name = pnp_name;
+                    }
+                }
+
+                if friendly_name == "SmartCam"
+                    || friendly_name.contains("SmartCam Virtual Camera")
+                    || symbolic_link
+                        .to_ascii_uppercase()
+                        .contains(&SMARTCAM_MF_CLSID_STR.to_ascii_uppercase())
+                {
+                    continue;
+                }
+
+                let dedup_key = pnp_instance_key_from_symlink(&symbolic_link)
+                    .unwrap_or_else(|| symbolic_link.clone())
+                    .to_ascii_lowercase();
+                if !dedup_key.is_empty() && seen_keys.contains(&dedup_key) {
+                    continue;
+                }
+                if !dedup_key.is_empty() {
+                    seen_keys.push(dedup_key);
+                }
+
+                let is_infrared =
+                    is_sensor_cat || is_ir_camera_name(&friendly_name, &symbolic_link);
+                let index = results.len() as u32;
+                results.push((
+                    activate.clone(),
+                    CameraDeviceInfo {
+                        index,
+                        friendly_name,
+                        symbolic_link,
+                        is_infrared,
+                    },
+                ));
+            }
+            CoTaskMemFree(Some(pp_devices as *mut c_void));
+        }
+    }
+
+    results
+}
+
+/// Lists all physical hardware video capture devices connected to the Windows system
+/// (including standard RGB cameras and Infrared / Windows Hello sensor cameras).
 pub fn enumerate_camera_devices() -> Vec<CameraDeviceInfo> {
     let mut devices = Vec::new();
     unsafe {
@@ -105,73 +296,10 @@ pub fn enumerate_camera_devices() -> Vec<CameraDeviceInfo> {
             return devices;
         }
 
-        let mut attr = None;
-        if MFCreateAttributes(&mut attr, 1).is_ok() {
-            if let Some(attr) = attr {
-                let _ = attr.SetGUID(
-                    &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
-                    &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID,
-                );
-
-                let mut pp_devices: *mut Option<IMFActivate> = std::ptr::null_mut();
-                let mut count = 0u32;
-
-                if MFEnumDeviceSources(&attr, &mut pp_devices, &mut count).is_ok()
-                    && !pp_devices.is_null()
-                {
-                    let activates = std::slice::from_raw_parts(pp_devices, count as usize);
-                    for activate in activates.iter().flatten() {
-                        let mut friendly_name = String::new();
-                        let mut symbolic_link = String::new();
-
-                        let mut name_ptr = PWSTR::null();
-                        let mut name_len = 0u32;
-                        if activate
-                            .GetAllocatedString(
-                                &MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
-                                &mut name_ptr,
-                                &mut name_len,
-                            )
-                            .is_ok()
-                            && !name_ptr.is_null()
-                        {
-                            friendly_name = pwstr_to_string(name_ptr);
-                            CoTaskMemFree(Some(name_ptr.0 as *mut c_void));
-                        }
-
-                        let mut sym_ptr = PWSTR::null();
-                        let mut sym_len = 0u32;
-                        if activate
-                            .GetAllocatedString(
-                                &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
-                                &mut sym_ptr,
-                                &mut sym_len,
-                            )
-                            .is_ok()
-                            && !sym_ptr.is_null()
-                        {
-                            symbolic_link = pwstr_to_string(sym_ptr);
-                            CoTaskMemFree(Some(sym_ptr.0 as *mut c_void));
-                        }
-
-                        if friendly_name != "SmartCam"
-                            && !friendly_name.contains("SmartCam Virtual Camera")
-                            && !symbolic_link.contains(SMARTCAM_MF_CLSID_STR)
-                        {
-                            let is_infrared = is_ir_camera_name(&friendly_name, &symbolic_link);
-                            let index = devices.len() as u32;
-                            devices.push(CameraDeviceInfo {
-                                index,
-                                friendly_name,
-                                symbolic_link,
-                                is_infrared,
-                            });
-                        }
-                    }
-                    CoTaskMemFree(Some(pp_devices as *mut c_void));
-                }
-            }
-        }
+        devices = collect_hardware_camera_activates()
+            .into_iter()
+            .map(|(_, info)| info)
+            .collect();
 
         let _ = MFShutdown();
         CoUninitialize();
@@ -222,73 +350,31 @@ impl CameraSource for MfCameraCapture {
             }
             self.mf_started = true;
 
-            let mut enum_attr = None;
-            if MFCreateAttributes(&mut enum_attr, 1).is_err() {
-                self.close();
-                return false;
-            }
-            let enum_attr = match enum_attr {
-                Some(a) => a,
-                None => {
-                    self.close();
-                    return false;
-                }
-            };
-
-            let _ = enum_attr.SetGUID(
-                &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
-                &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID,
-            );
-
-            let mut pp_devices: *mut Option<IMFActivate> = std::ptr::null_mut();
-            let mut count = 0u32;
-            if MFEnumDeviceSources(&enum_attr, &mut pp_devices, &mut count).is_err()
-                || pp_devices.is_null()
-                || count == 0
-            {
+            let activates = collect_hardware_camera_activates();
+            if activates.is_empty() {
                 self.close();
                 return false;
             }
 
-            let activates = std::slice::from_raw_parts(pp_devices, count as usize);
             let mut selected_idx = 0usize;
-
             if !config.device_id.is_empty() {
-                for (i, act_opt) in activates.iter().enumerate() {
-                    if let Some(act) = act_opt {
-                        let mut sym_ptr = PWSTR::null();
-                        let mut sym_len = 0u32;
-                        if act
-                            .GetAllocatedString(
-                                &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
-                                &mut sym_ptr,
-                                &mut sym_len,
-                            )
-                            .is_ok()
-                            && !sym_ptr.is_null()
-                        {
-                            let sym = pwstr_to_string(sym_ptr);
-                            CoTaskMemFree(Some(sym_ptr.0 as *mut c_void));
-                            if sym.contains(&config.device_id) {
-                                selected_idx = i;
-                                break;
-                            }
-                        }
+                for (i, (_, info)) in activates.iter().enumerate() {
+                    if info.symbolic_link.contains(&config.device_id) {
+                        selected_idx = i;
+                        break;
                     }
                 }
-            } else if (config.device_index as usize) < count as usize {
+            } else if (config.device_index as usize) < activates.len() {
                 selected_idx = config.device_index as usize;
             }
 
-            let media_source = if let Some(Some(ref act)) = activates.get(selected_idx) {
+            let media_source = if let Some((ref act, _)) = activates.get(selected_idx) {
                 act.ActivateObject::<windows::Win32::Media::MediaFoundation::IMFMediaSource>()
             } else {
-                CoTaskMemFree(Some(pp_devices as *mut c_void));
                 self.close();
                 return false;
             };
-
-            CoTaskMemFree(Some(pp_devices as *mut c_void));
+            drop(activates);
 
             let media_source = match media_source {
                 Ok(ms) => ms,
@@ -298,7 +384,7 @@ impl CameraSource for MfCameraCapture {
                 }
             };
 
-            // Enable video processing in source reader
+            // Enable video processing in source reader (converts NV12/YUY2/L8/L16 to RGB32)
             let mut reader_attr = None;
             let _ = MFCreateAttributes(&mut reader_attr, 2);
             if let Some(ref r_attr) = reader_attr {
@@ -332,17 +418,11 @@ impl CameraSource for MfCameraCapture {
                     if let Ok(fb_t) = MFCreateMediaType() {
                         let _ = fb_t.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video);
                         let _ = fb_t.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_RGB32);
-                        if reader
-                            .SetCurrentMediaType(
-                                MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32,
-                                None,
-                                &fb_t,
-                            )
-                            .is_err()
-                        {
-                            self.close();
-                            return false;
-                        }
+                        let _ = reader.SetCurrentMediaType(
+                            MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32,
+                            None,
+                            &fb_t,
+                        );
                     }
                 }
             }
@@ -414,6 +494,7 @@ impl CameraSource for MfCameraCapture {
             let h = self.actual_config.height;
             let expected_bytes_32 = (w as usize) * (h as usize) * 4;
             let expected_bytes_64 = (w as usize) * (h as usize) * 8;
+            let expected_bytes_l8 = (w as usize) * (h as usize);
 
             let success = if self.actual_config.bit_depth == 64 {
                 dst_bgra.resize(expected_bytes_64, 0);
@@ -425,7 +506,6 @@ impl CameraSource for MfCameraCapture {
                     );
                     true
                 } else if (cur_len as usize) >= expected_bytes_32 {
-                    // Convert 8-bit to 16-bit BGRA: each channel val * 257 (0..255 -> 0..65535)
                     let src_slice = std::slice::from_raw_parts(raw_ptr, expected_bytes_32);
                     let dst_u16 = std::slice::from_raw_parts_mut(
                         dst_bgra.as_mut_ptr() as *mut u16,
@@ -441,6 +521,18 @@ impl CameraSource for MfCameraCapture {
             } else if (cur_len as usize) >= expected_bytes_32 {
                 dst_bgra.resize(expected_bytes_32, 0);
                 std::ptr::copy_nonoverlapping(raw_ptr, dst_bgra.as_mut_ptr(), expected_bytes_32);
+                true
+            } else if (cur_len as usize) >= expected_bytes_l8 && expected_bytes_l8 > 0 {
+                // L8 monochrome IR sensor fallback -> expand 8-bit greyscale to BGRA32
+                dst_bgra.resize(expected_bytes_32, 255);
+                let src_slice = std::slice::from_raw_parts(raw_ptr, expected_bytes_l8);
+                for (i, &lum) in src_slice.iter().enumerate() {
+                    let base = i * 4;
+                    dst_bgra[base] = lum;
+                    dst_bgra[base + 1] = lum;
+                    dst_bgra[base + 2] = lum;
+                    dst_bgra[base + 3] = 255;
+                }
                 true
             } else {
                 false

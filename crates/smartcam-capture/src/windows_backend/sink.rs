@@ -48,7 +48,7 @@ type PfnMfCreateVirtualCamera = unsafe extern "system" fn(
 
 /// Media Foundation Virtual Camera Sink (`MfVirtualCameraSink`).
 /// Manages high-performance shared-memory frame transfer to the Media Foundation Virtual Camera
-/// source driver, optionally registering dynamic session virtual camera on Windows 11 21H2+.
+/// source driver, registering dynamic session virtual camera on Windows 11 21H2+ via `mfsensorgroup.dll`.
 #[derive(Default)]
 pub struct MfVirtualCameraSink {
     ipc: Option<SharedFrameIpc>,
@@ -65,12 +65,39 @@ impl MfVirtualCameraSink {
     pub fn new() -> Self {
         Self::default()
     }
+
+    fn sync_staged_mf_source_dll() {
+        let public_dir = std::path::PathBuf::from(r"C:\Users\Public\SmartCam");
+        let public_dll = public_dir.join("smartcam_mf_source.dll");
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                let candidates = [
+                    dir.join("smartcam_mf_source.dll"),
+                    dir.parent()
+                        .map(|p| p.join("smartcam_mf_source.dll"))
+                        .unwrap_or_default(),
+                ];
+                for src in candidates.iter().filter(|p| p.exists() && *p != &public_dll) {
+                    let _ = std::fs::create_dir_all(&public_dir);
+                    if std::fs::copy(src, &public_dll).is_err() {
+                        let old_dll = public_dir.join("smartcam_mf_source.dll.old");
+                        let _ = std::fs::remove_file(&old_dll);
+                        if std::fs::rename(&public_dll, &old_dll).is_ok() {
+                            let _ = std::fs::copy(src, &public_dll);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
 }
 
 impl VirtualCameraSink for MfVirtualCameraSink {
     fn initialize(&mut self, config: &VirtualCameraSinkConfig) -> bool {
         self.shutdown();
         self.config = config.clone();
+        Self::sync_staged_mf_source_dll();
 
         unsafe {
             let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
@@ -98,8 +125,11 @@ impl VirtualCameraSink for MfVirtualCameraSink {
             };
             self.ipc = Some(ipc);
 
-            // 2. Attempt to bind Windows 11 Native MFCreateVirtualCamera API
-            let mut dll = LoadLibraryW(w!("mfvirtualcamera.dll")).ok();
+            // 2. Bind Windows 11 Native MFCreateVirtualCamera API (resides in mfsensorgroup.dll)
+            let mut dll = LoadLibraryW(w!("mfsensorgroup.dll")).ok();
+            if dll.is_none() {
+                dll = LoadLibraryW(w!("mfvirtualcamera.dll")).ok();
+            }
             if dll.is_none() {
                 dll = LoadLibraryW(w!("mfplat.dll")).ok();
             }
@@ -112,9 +142,8 @@ impl VirtualCameraSink for MfVirtualCameraSink {
 
                 if let Some(pfn_ptr) = proc {
                     let pfn: PfnMfCreateVirtualCamera = std::mem::transmute(pfn_ptr);
-                    let wide_name: Vec<u16> = self
-                        .config
-                        .friendly_name
+                    // Always enforce single canonical name "SmartCam"
+                    let wide_name: Vec<u16> = "SmartCam"
                         .encode_utf16()
                         .chain(std::iter::once(0))
                         .collect();
@@ -137,9 +166,14 @@ impl VirtualCameraSink for MfVirtualCameraSink {
 
                     if create_hr.is_ok() {
                         if let Some(ref v) = vcam {
-                            let _ = v.Start(None);
+                            let start_hr = v.Start(None);
+                            if start_hr.is_err() {
+                                eprintln!("[SmartCam][Sink] IMFVirtualCamera::Start failed: {:?}", start_hr);
+                            }
                         }
                         self.vcam_handle = vcam;
+                    } else {
+                        eprintln!("[SmartCam][Sink] MFCreateVirtualCamera failed: {:?}", create_hr);
                     }
                 }
             }
@@ -199,6 +233,7 @@ impl VirtualCameraSink for MfVirtualCameraSink {
         if let Some(vcam) = self.vcam_handle.take() {
             unsafe {
                 let _ = vcam.Stop();
+                let _ = vcam.Remove();
                 let _ = vcam.Shutdown();
             }
         }

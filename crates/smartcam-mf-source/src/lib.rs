@@ -14,8 +14,9 @@
  */
 
 //! SmartCam v2.0 Pure Media Foundation In-Process COM Virtual Camera Source (`smartcam_mf_source.dll`).
-//! Implements `IClassFactory`, `IMFMediaSourceEx`, `IMFMediaSource`, `IMFMediaStream`,
-//! `IMFMediaEventGenerator`, and `IMFGetService` using the official `windows` crate.
+//! Implements `IClassFactory`, `IMFActivate`, `IMFAttributes`, `IMFMediaSourceEx`,
+//! `IMFMediaSource`, `IMFMediaStream`, `IMFMediaEventGenerator`, and `IMFGetService`
+//! using the official `windows` crate.
 
 #[cfg(windows)]
 pub mod constants;
@@ -51,16 +52,21 @@ mod tests {
     use std::mem::{align_of, size_of};
     #[cfg(windows)]
     use windows::{
-        core::{IUnknown, Interface},
+        core::{IUnknown, Interface, GUID},
         Win32::{
-            Foundation::S_OK,
+            Foundation::{BOOL, S_OK},
             Media::MediaFoundation::{
-                IMFMediaEventGenerator, IMFMediaSource, IMFMediaSourceEx, MFShutdown, MFStartup,
-                MFMEDIASOURCE_IS_LIVE, MF_VERSION,
+                IMFActivate, IMFAttributes, IMFMediaEventGenerator, IMFMediaSource,
+                IMFMediaSourceEx, IMFMediaStream, IMFStreamDescriptor,
+                MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS, MFShutdown, MFStartup,
+                MFMEDIASOURCE_IS_LIVE, MF_DEVICEMFT_SENSORPROFILE_COLLECTION,
+                MF_DEVICESTREAM_STREAM_CATEGORY, MF_VERSION,
             },
             System::Com::{CoInitializeEx, CoUninitialize, IClassFactory, COINIT_MULTITHREADED},
         },
     };
+    #[cfg(windows)]
+    use windows_core::PROPVARIANT;
 
     #[test]
     fn test_shared_frame_header_abi_and_cross_crate_roundtrip() {
@@ -154,33 +160,32 @@ mod tests {
 
             let factory: IClassFactory = IClassFactory::from_raw(factory_ptr);
 
-            // 2. Calling CreateInstance returns a valid COM object
-            let unk: IUnknown = factory
+            // 2. FrameServer activates via IID_IMFActivate
+            let activate: IMFActivate = factory
                 .CreateInstance(None)
-                .expect("CreateInstance must succeed");
+                .expect("CreateInstance(IID_IMFActivate) must succeed");
 
-            // 3. Responds to QueryInterface: IMFMediaSource
-            let source: IMFMediaSource = unk
-                .cast()
-                .expect("QueryInterface for IMFMediaSource must succeed");
+            let source: IMFMediaSource = activate
+                .ActivateObject()
+                .expect("IMFActivate::ActivateObject(IID_IMFMediaSource) must succeed");
 
-            // 4. Responds to QueryInterface: IMFMediaSourceEx
-            let source_ex: IMFMediaSourceEx = unk
+            // 3. Responds to QueryInterface: IMFMediaSourceEx & IMFAttributes
+            let source_ex: IMFMediaSourceEx = source
                 .cast()
                 .expect("QueryInterface for IMFMediaSourceEx must succeed");
-            assert_eq!(
-                source_ex
-                    .GetCharacteristics()
-                    .expect("GetCharacteristics on source_ex"),
-                MFMEDIASOURCE_IS_LIVE.0 as u32
-            );
+            let source_attrs: IMFAttributes = source
+                .cast()
+                .expect("QueryInterface for IMFAttributes on source must succeed");
+            let _sensor_profile_unk: IUnknown = source_attrs
+                .GetUnknown(&MF_DEVICEMFT_SENSORPROFILE_COLLECTION)
+                .expect("MF_DEVICEMFT_SENSORPROFILE_COLLECTION must be present on source");
 
-            // 5. Responds to QueryInterface: IMFMediaEventGenerator
-            let _: IMFMediaEventGenerator = unk
+            // 4. Responds to QueryInterface: IMFMediaEventGenerator
+            let _: IMFMediaEventGenerator = source
                 .cast()
                 .expect("QueryInterface for IMFMediaEventGenerator must succeed");
 
-            // 6. Supports GetCharacteristics(MFMEDIASOURCE_IS_LIVE)
+            // 5. Supports GetCharacteristics(MFMEDIASOURCE_IS_LIVE)
             let chars = source
                 .GetCharacteristics()
                 .expect("GetCharacteristics must succeed");
@@ -189,7 +194,7 @@ mod tests {
                 "Characteristics must be MFMEDIASOURCE_IS_LIVE"
             );
 
-            // 7. Supports CreatePresentationDescriptor
+            // 6. Supports CreatePresentationDescriptor & stream attributes
             let pres_desc = source
                 .CreatePresentationDescriptor()
                 .expect("CreatePresentationDescriptor must succeed");
@@ -201,8 +206,64 @@ mod tests {
                 "Virtual camera must have exactly 1 stream descriptor"
             );
 
+            let mut selected = BOOL::default();
+            let mut sd_opt: Option<IMFStreamDescriptor> = None;
+            pres_desc
+                .GetStreamDescriptorByIndex(0, &mut selected, &mut sd_opt)
+                .expect("GetStreamDescriptorByIndex(0) must succeed");
+            assert!(selected.as_bool());
+            let sd = sd_opt.expect("StreamDescriptor must be Some");
+            let cat = sd
+                .GetGUID(&MF_DEVICESTREAM_STREAM_CATEGORY)
+                .expect("MF_DEVICESTREAM_STREAM_CATEGORY on stream descriptor");
+            assert_eq!(cat, PINNAME_VIDEO_CAPTURE);
+
+            // 7. Start source -> MENewStream -> IMFMediaStream::GetMediaSource -> RequestSample
+            let start_pos = PROPVARIANT::default();
+            source
+                .Start(&pres_desc, &GUID::zeroed(), &start_pos)
+                .expect("IMFMediaSource::Start must succeed");
+
+            let ev1 = source
+                .GetEvent(MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS(0))
+                .expect("GetEvent(MENewStream)");
+            let ev1_val = ev1.GetValue().expect("MENewStream value");
+            let stream_unk: IUnknown = IUnknown::try_from(&ev1_val).expect("MENewStream IUnknown");
+            let stream: IMFMediaStream = stream_unk.cast().expect("cast to IMFMediaStream");
+            let _: IMFAttributes = stream.cast().expect("stream must implement IMFAttributes");
+
+            let parent_src = stream
+                .GetMediaSource()
+                .expect("IMFMediaStream::GetMediaSource must succeed");
+            assert_eq!(
+                parent_src.as_raw(),
+                source.as_raw(),
+                "GetMediaSource must return the exact same COM IMFMediaSource identity"
+            );
+
+            // Drain MESourceStarted and MEStreamStarted, then RequestSample
+            let _ = source
+                .GetEvent(MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS(0))
+                .expect("GetEvent(MESourceStarted)");
+            let _ = stream
+                .GetEvent(MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS(0))
+                .expect("GetEvent(MEStreamStarted)");
+
+            stream
+                .RequestSample(None)
+                .expect("IMFMediaStream::RequestSample must succeed");
+            let sample_ev = stream
+                .GetEvent(MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS(0))
+                .expect("GetEvent(MEMediaSample)");
+            assert_eq!(
+                sample_ev.GetType().expect("GetType"),
+                windows::Win32::Media::MediaFoundation::MEMediaSample.0 as u32
+            );
+
             // Clean shutdown
+            let _ = source.Stop();
             let _ = source.Shutdown();
+            let _ = source_ex;
             let _ = MFShutdown();
             CoUninitialize();
         }

@@ -23,7 +23,7 @@ pub fn is_ir_camera_name(name: &str, symlink: &str) -> bool {
         || n_up.contains("WINDOWS HELLO")
         || s_up.contains("INFRARED")
         || s_up.contains("WINDOWS HELLO")
-        || s_up.contains("SENSOR_CAMERA")
+        || s_up.contains("SENSOR_CAMERA") || s_up.contains("24E552D7-6523-47F7-A647-D3465BF1F5CA")
     {
         return true;
     }

@@ -11,12 +11,13 @@
 #define MyAppURL "https://github.com/RubensRainelli/SmartCam"
 #define MyAppExeName "SmartCam.exe"
 #define MyAppId "{{9D4B8E71-3F5A-4E9C-A8B2-71C9D0E54F21}"
+#define LegacyDShowCategoryId "{{860BB310-5D01-11d0-BD3B-00A0C911CE86}"
 
 [Setup]
 AppId={#MyAppId}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-AppVerName={#MyAppName} v{#MyAppVersion}
+AppVerName={#MyAppName}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}/issues
@@ -47,9 +48,20 @@ Name: "italian"; MessagesFile: "compiler:Languages\Italian.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 Name: "autostart"; Description: "Start SmartCam automatically when Windows starts"; GroupDescription: "Startup Options:"; Flags: unchecked
 
+[Dirs]
+Name: "{app}"; Permissions: users-modify
+Name: "{app}\config"; Permissions: users-modify
+Name: "{commondocs}\..\SmartCam"; Permissions: users-modify
+
+[InstallDelete]
+Type: filesandordirs; Name: "{localappdata}\Programs\SmartCam"
+Type: files; Name: "{app}\smartcam_engine*.dll"
+Type: files; Name: "{app}\smartcam_win_bridge.dll"
+
 [Files]
 Source: "target\release\SmartCam.exe"; DestDir: "{app}"; Flags: ignoreversion 64bit
 Source: "target\release\smartcam_mf_source.dll"; DestDir: "{app}"; Flags: ignoreversion 64bit
+Source: "target\release\smartcam_mf_source.dll"; DestDir: "{commondocs}\..\SmartCam"; Flags: ignoreversion 64bit
 Source: "platforms\windows\installer\smartcam_publisher.cer"; DestDir: "{app}"; Flags: ignoreversion
 Source: "assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "config\default_config.yaml"; DestDir: "{app}\config"; Flags: ignoreversion onlyifdoesntexist
@@ -60,14 +72,22 @@ Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.it.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\icons\smartcam.ico"; Comment: "SmartCam Virtual Camera & AI Studio"
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\icons\smartcam.ico"; Comment: "SmartCam"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\icons\smartcam.ico"; Tasks: desktopicon
 
 [Registry]
-; Media Foundation Virtual Camera COM InprocServer32 Registration
-Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}"; ValueType: string; ValueName: ""; ValueData: "SmartCam Virtual Camera"; Flags: uninsdeletekey
-Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{app}\smartcam_mf_source.dll"; Flags: uninsdeletekey
+; Clean up any legacy v1.x DirectShow virtual camera entries to prevent duplicate/stale cameras
+Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{#LegacyDShowCategoryId}\Instance\{#MyAppId}"; Flags: dontcreatekey deletekey
+Root: HKCU; Subkey: "SOFTWARE\Classes\CLSID\{#LegacyDShowCategoryId}\Instance\{#MyAppId}"; Flags: dontcreatekey deletekey
+; Media Foundation Virtual Camera COM InprocServer32 Registration (Single driver named "SmartCam")
+Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}"; ValueType: string; ValueName: ""; ValueData: "SmartCam"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}"; ValueType: string; ValueName: "FriendlyName"; ValueData: "SmartCam"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{commondocs}\..\SmartCam\smartcam_mf_source.dll"; Flags: uninsdeletekey
 Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}\InprocServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Both"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}"; ValueType: string; ValueName: ""; ValueData: "SmartCam"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}"; ValueType: string; ValueName: "FriendlyName"; ValueData: "SmartCam"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{commondocs}\..\SmartCam\smartcam_mf_source.dll"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}\InprocServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Both"; Flags: uninsdeletekey
 ; Media Foundation FrameServer Mode Enablement
 Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows Media Foundation\Platform"; ValueType: dword; ValueName: "EnableFrameServerMode"; ValueData: "1"
 ; Optional Startup Registration

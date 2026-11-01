@@ -747,6 +747,18 @@ extern "system" {
         cbData: DWORD,
     ) -> LONG;
     pub fn RegDeleteValueW(hKey: HKEY, lpValueName: *const u16) -> LONG;
+    pub fn RegDeleteKeyW(hKey: HKEY, lpSubKey: *const u16) -> LONG;
+    pub fn RegDeleteTreeW(hKey: HKEY, lpSubKey: *const u16) -> LONG;
+    pub fn RegEnumKeyExW(
+        hKey: HKEY,
+        dwIndex: DWORD,
+        lpName: *mut u16,
+        lpcchName: *mut DWORD,
+        lpReserved: *mut DWORD,
+        lpClass: *mut u16,
+        lpcchClass: *mut DWORD,
+        lpftLastWriteTime: *mut c_void,
+    ) -> LONG;
     pub fn RegCloseKey(hKey: HKEY) -> LONG;
 }
 

@@ -35,7 +35,7 @@ use windows::{
         System::{
             Memory::{
                 CreateFileMappingW, MapViewOfFile, OpenFileMappingW, UnmapViewOfFile,
-                FILE_MAP_ALL_ACCESS, FILE_MAP_READ, PAGE_READWRITE,
+                FILE_MAP_ALL_ACCESS, FILE_MAP_READ, PAGE_READONLY, PAGE_READWRITE,
             },
             SystemInformation::GetTickCount64,
             Threading::{CreateEventW, OpenEventW, SetEvent, EVENT_MODIFY_STATE},
@@ -46,8 +46,68 @@ use windows::{
 #[cfg(windows)]
 const SECURITY_DESCRIPTOR_REVISION: u32 = 1;
 
+#[cfg(windows)]
+const CROSS_SESSION_BACKING_PATH: &str = r"C:\Users\Public\SmartCam_MF_SharedFrame_v1.ipc";
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn CreateFileW(
+        lpFileName: *const u16,
+        dwDesiredAccess: u32,
+        dwShareMode: u32,
+        lpSecurityAttributes: *const SECURITY_ATTRIBUTES,
+        dwCreationDisposition: u32,
+        dwFlagsAndAttributes: u32,
+        hTemplateFile: *mut core::ffi::c_void,
+    ) -> *mut core::ffi::c_void;
+}
+
+#[cfg(windows)]
+unsafe fn open_cross_session_backing_file(
+    p_sa: *const SECURITY_ATTRIBUTES,
+    write_access: bool,
+) -> HANDLE {
+    const GENERIC_READ: u32 = 0x8000_0000;
+    const GENERIC_WRITE: u32 = 0x4000_0000;
+    const FILE_SHARE_READ: u32 = 0x0000_0001;
+    const FILE_SHARE_WRITE: u32 = 0x0000_0002;
+    const FILE_SHARE_DELETE: u32 = 0x0000_0004;
+    const OPEN_EXISTING: u32 = 3;
+    const OPEN_ALWAYS: u32 = 4;
+    const FILE_ATTRIBUTE_TEMPORARY: u32 = 0x0000_0100;
+
+    let wide_path: Vec<u16> = CROSS_SESSION_BACKING_PATH
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let access = if write_access {
+        GENERIC_READ | GENERIC_WRITE
+    } else {
+        GENERIC_READ
+    };
+    let disp = if write_access {
+        OPEN_ALWAYS
+    } else {
+        OPEN_EXISTING
+    };
+
+    let raw = CreateFileW(
+        wide_path.as_ptr(),
+        access,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        p_sa,
+        disp,
+        FILE_ATTRIBUTE_TEMPORARY,
+        core::ptr::null_mut(),
+    );
+    HANDLE(raw)
+}
+
 /// High-performance shared memory inter-process communication wrapper.
 /// Compatible with both the Windows Media Foundation COM Virtual Camera driver
+/// (including Session 0 `FrameServer` and Session 1 user-mode apps)
 /// and the SmartCam user-mode compositing engine (`FallbackSharedMemoryWriter`).
 pub struct SharedFrameIpc {
     #[cfg(windows)]
@@ -80,6 +140,7 @@ impl SharedFrameIpc {
         let total_bytes = TOTAL_SHARED_FRAME_BYTES;
         let size_high = ((total_bytes as u64 >> 32) & 0xFFFF_FFFF) as u32;
         let size_low = (total_bytes as u64 & 0xFFFF_FFFF) as u32;
+        let use_backing_file = mapping_name == DEFAULT_SHARED_MAPPING_NAME;
 
         unsafe {
             let mut sd = SECURITY_DESCRIPTOR::default();
@@ -105,7 +166,7 @@ impl SharedFrameIpc {
                 p_sa = &sa;
             }
 
-            let mapping_handle: Option<HANDLE>;
+            let mut mapping_handle: Option<HANDLE> = None;
             let mut read_only = false;
             let mut newly_created = false;
 
@@ -113,18 +174,54 @@ impl SharedFrameIpc {
                 let h = OpenFileMappingW(FILE_MAP_ALL_ACCESS.0, false, PCWSTR(wide_map.as_ptr()));
                 if let Ok(h) = h {
                     mapping_handle = Some(h);
-                } else {
-                    let h_ro = OpenFileMappingW(FILE_MAP_READ.0, false, PCWSTR(wide_map.as_ptr()));
-                    if let Ok(h_ro) = h_ro {
-                        mapping_handle = Some(h_ro);
-                        read_only = true;
-                    } else {
-                        return None;
+                } else if let Ok(h_ro) =
+                    OpenFileMappingW(FILE_MAP_READ.0, false, PCWSTR(wide_map.as_ptr()))
+                {
+                    mapping_handle = Some(h_ro);
+                    read_only = true;
+                } else if use_backing_file {
+                    // Fallback for Windows 11 FrameServer running in Session 0 (where Session 1's Local\ is isolated):
+                    // map the shared backing file in C:\Users\Public so Session 0 and Session 1 share the exact same physical RAM pages.
+                    let mut hfile = open_cross_session_backing_file(p_sa, true);
+                    let mut file_ro = false;
+                    if hfile == INVALID_HANDLE_VALUE || hfile.0.is_null() {
+                        hfile = open_cross_session_backing_file(p_sa, false);
+                        file_ro = true;
+                    }
+                    if hfile != INVALID_HANDLE_VALUE && !hfile.0.is_null() {
+                        let prot = if file_ro {
+                            PAGE_READONLY
+                        } else {
+                            PAGE_READWRITE
+                        };
+                        if let Ok(hm) = CreateFileMappingW(
+                            hfile,
+                            if p_sa.is_null() { None } else { Some(p_sa) },
+                            prot,
+                            size_high,
+                            size_low,
+                            PCWSTR::null(),
+                        ) {
+                            mapping_handle = Some(hm);
+                            read_only = file_ro;
+                        }
+                        let _ = CloseHandle(hfile);
                     }
                 }
             } else {
+                let backing_hfile = if use_backing_file {
+                    let hf = open_cross_session_backing_file(p_sa, true);
+                    if hf != INVALID_HANDLE_VALUE && !hf.0.is_null() {
+                        hf
+                    } else {
+                        INVALID_HANDLE_VALUE
+                    }
+                } else {
+                    INVALID_HANDLE_VALUE
+                };
+
                 let h = CreateFileMappingW(
-                    INVALID_HANDLE_VALUE,
+                    backing_hfile,
                     if p_sa.is_null() { None } else { Some(p_sa) },
                     PAGE_READWRITE,
                     size_high,
@@ -132,17 +229,17 @@ impl SharedFrameIpc {
                     PCWSTR(wide_map.as_ptr()),
                 );
 
+                if backing_hfile != INVALID_HANDLE_VALUE {
+                    let _ = CloseHandle(backing_hfile);
+                }
+
                 if let Ok(h) = h {
                     newly_created = GetLastError() != ERROR_ALREADY_EXISTS;
                     mapping_handle = Some(h);
-                } else {
-                    let h_open =
-                        OpenFileMappingW(FILE_MAP_ALL_ACCESS.0, false, PCWSTR(wide_map.as_ptr()));
-                    if let Ok(h_open) = h_open {
-                        mapping_handle = Some(h_open);
-                    } else {
-                        return None;
-                    }
+                } else if let Ok(h_open) =
+                    OpenFileMappingW(FILE_MAP_ALL_ACCESS.0, false, PCWSTR(wide_map.as_ptr()))
+                {
+                    mapping_handle = Some(h_open);
                 }
             }
 
@@ -187,7 +284,7 @@ impl SharedFrameIpc {
                 }
             }
 
-            if !read_only {
+            if !read_only && is_producer {
                 let hdr = &mut *(mapped_view as *mut SharedFrameHeader);
                 if newly_created || hdr.magic != SHARED_FRAME_MAGIC {
                     std::ptr::write_bytes(mapped_view, 0, SHARED_FRAME_HEADER_BYTES);

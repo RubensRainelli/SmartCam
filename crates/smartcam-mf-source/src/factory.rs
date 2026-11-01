@@ -23,7 +23,7 @@ use windows::{
     },
 };
 
-use crate::source::SmartCamMfMediaSource;
+use crate::{constants::trace_mf, source::SmartCamMfMediaSource};
 
 pub static SERVER_LOCKS: AtomicI32 = AtomicI32::new(0);
 
@@ -56,9 +56,13 @@ impl IClassFactory_Impl for SmartCamClassFactory_Impl {
             return Err(windows::core::Error::from_hresult(E_POINTER));
         }
 
-        let media_source: IMFMediaSourceEx = SmartCamMfMediaSource::new()?.into();
+        let requested_iid = unsafe { *riid };
+        trace_mf(&format!("CreateInstance requested riid={:?}", requested_iid));
+        let media_source: IMFMediaSourceEx = SmartCamMfMediaSource::create_com()?;
         let unk: IUnknown = media_source.into();
-        unsafe { unk.query(riid, ppvobject).ok() }
+        let hr = unsafe { unk.query(riid, ppvobject) };
+        trace_mf(&format!("CreateInstance query riid={:?} -> hr={:?}", requested_iid, hr));
+        hr.ok()
     }
 
     fn LockServer(&self, flock: BOOL) -> Result<()> {

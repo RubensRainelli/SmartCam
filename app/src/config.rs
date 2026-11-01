@@ -467,7 +467,17 @@ impl SmartCamConfig {
 
     pub fn load_from_file(path: &Path) -> Self {
         let mut cfg = Self::default();
-        let Ok(raw) = fs::read_to_string(path) else {
+        let effective_path = if path.to_string_lossy().contains("Program Files") {
+            if let (Ok(local_app), Some(fname)) = (std::env::var("LOCALAPPDATA"), path.file_name()) {
+                let fb = PathBuf::from(local_app).join("SmartCam").join("config").join(fname);
+                if fb.is_file() { fb } else { path.to_path_buf() }
+            } else {
+                path.to_path_buf()
+            }
+        } else {
+            path.to_path_buf()
+        };
+        let Ok(raw) = fs::read_to_string(&effective_path) else {
             return cfg;
         };
 
@@ -959,7 +969,18 @@ virtual_camera:\n\
             shm = shm_escaped,
         );
 
-        fs::write(path, yaml).map_err(|e| format!("Impossibile salvare {}: {}", path.display(), e))
+        if let Err(e) = fs::write(path, &yaml) {
+            if let (Ok(local_app), Some(fname)) = (std::env::var("LOCALAPPDATA"), path.file_name()) {
+                let fb_dir = PathBuf::from(local_app).join("SmartCam").join("config");
+                let _ = fs::create_dir_all(&fb_dir);
+                let fb_path = fb_dir.join(fname);
+                if fs::write(&fb_path, &yaml).is_ok() {
+                    return Ok(());
+                }
+            }
+            return Err(format!("Impossibile salvare {}: {}", path.display(), e));
+        }
+        Ok(())
     }
 }
 
