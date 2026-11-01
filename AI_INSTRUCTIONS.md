@@ -44,3 +44,20 @@ If editing package configuration files, do not use standard OSI identifiers (lik
 
 ### 4. Code Distribution & Re-licensing
 - Under Clause 5, users are prohibited from distributing modified versions under a different license. Do not suggest or write configuration files that re-license the codebase (e.g., setting up automated GPL or MIT packaging pipelines).
+
+---
+
+## 🚀 Release, Testing & Versioning Policy (Mandatory)
+
+Every AI Assistant working on this repository **MUST** strictly follow these rules before and during any release publication:
+
+### 1. Pre-Release Testing of Modified Components
+- **Before publishing any release**, the functionality of all modified parts/components **MUST be tested and verified** (e.g., unit tests, compilation checks, integration/runtime verification of affected modules).
+- Never publish or tag a release with untested changes.
+
+### 2. Semantic Versioning Standard (`v. A.B.C`)
+Upon publishing a release, the project version must be incremented across the codebase (`Cargo.toml`, installers/packages, `CHANGELOG.md`, etc.) according to the `v. A.B.C` format:
+- **`A` (Major / Main Release)**: Increment only when explicitly requested for substantial architectural or project-wide changes (e.g., moving from `v1.0.0` to `v2.0.0` due to the migration from C++ to Rust). Reset `B` and `C` to `0`.
+- **`B` (Minor / Feature Release)**: Increment for intermediate versions that introduce new features not previously present. Reset `C` to `0`.
+- **`C` (Patch / Bugfix Release)**: Increment for bugfixes, stability fixes, and minor patches that do not add new features.
+

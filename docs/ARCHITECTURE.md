@@ -181,3 +181,25 @@ The GitHub Actions workflow [`.github/workflows/release.yml`](../.github/workflo
 2. **Linux (`ubuntu-latest`)**: Compiles `SmartCam` and packages `SmartCam-v2.0.0-linux-x86_64.tar.gz` and `smartcam_2.0.0_amd64.deb`.
 3. **macOS (`macos-latest`)**: Cross-compiles `x86_64-apple-darwin` and `aarch64-apple-darwin`, merges them via `lipo -create` into a Universal `SmartCam.app` bundle, signs with `codesign --force --deep --sign -`, and packages `SmartCam-v2.0.0-macos-universal.dmg`.
 4. **Release Publication**: Computes `SHA256SUMS.txt` across all release assets and publishes them to the GitHub Release page.
+
+
+---
+
+## 7. Release Governance, Pre-Release Testing & Versioning Standard (`v. A.B.C`)
+
+All human contributors and AI coding assistants (via [`AGENTS.md`](../AGENTS.md) and [`AI_INSTRUCTIONS.md`](../AI_INSTRUCTIONS.md)) must adhere to the following release governance rules before publishing or tagging any release:
+
+### 1. Mandatory Pre-Release Verification
+Before packaging, tagging, or publishing a release, **all modified components and subsystems must be tested and verified**:
+* Execute the full workspace test suite (`cargo test --release --workspace`) and static analysis (`cargo clippy --workspace -- -D warnings`).
+* Perform functional/runtime verification of every modified module (e.g., video pipeline kernels, Media Foundation virtual camera IPC, HTTPS smartphone server, or platform installers).
+* **No release may be published with untested changes.**
+
+### 2. Versioning Standard (`v. A.B.C`)
+Every published release requires incrementing the version number across [`Cargo.toml`](../Cargo.toml), [`CHANGELOG.md`](../CHANGELOG.md), and platform installer metadata (`platforms/windows/installer/smartcam.iss`, Linux `.deb`/AppImage scripts, macOS bundle plist) according to the **`v. A.B.C`** standard:
+
+| Component | Designation | Increment Rule |
+| :--- | :--- | :--- |
+| **`A`** | **Main Release (Major)** | Incremented when explicitly requested for substantial architectural or project-wide changes (e.g., migrating from `v1.0.0` to `v2.0.0` for the transition from C++ to 100% Pure Rust). Resets `B` and `C` to `0`. |
+| **`B`** | **Feature Release (Minor)** | Incremented for intermediate releases that introduce new features or capabilities not previously present. Resets `C` to `0`. |
+| **`C`** | **Bugfix Release (Patch)** | Incremented for bug fixes, stability improvements, and minor patches that do not introduce new features. |

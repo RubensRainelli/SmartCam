@@ -71,6 +71,7 @@ pub const KEY_WOW64_64KEY: DWORD = 0x0100;
 pub const REG_SZ: DWORD = 1;
 pub const REG_BINARY: DWORD = 3;
 pub const REG_DWORD: DWORD = 4;
+pub const REG_QWORD: DWORD = 11;
 
 // Window Messages
 pub const WM_CREATE: UINT = 0x0001;

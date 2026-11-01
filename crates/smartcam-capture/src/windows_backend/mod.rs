@@ -18,4 +18,6 @@ pub mod capture;
 pub mod sink;
 
 pub use capture::{enumerate_camera_devices, MfCameraCapture};
-pub use sink::MfVirtualCameraSink;
+pub use sink::{
+    ensure_system_virtual_camera_started, remove_system_virtual_camera, MfVirtualCameraSink,
+};

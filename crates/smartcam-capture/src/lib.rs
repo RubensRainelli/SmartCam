@@ -43,7 +43,10 @@ pub use types::{
 };
 
 #[cfg(windows)]
-pub use windows_backend::{enumerate_camera_devices, MfCameraCapture, MfVirtualCameraSink};
+pub use windows_backend::{
+    ensure_system_virtual_camera_started, enumerate_camera_devices, remove_system_virtual_camera,
+    MfCameraCapture, MfVirtualCameraSink,
+};
 
 #[cfg(target_os = "linux")]
 pub use linux_backend::{enumerate_camera_devices, V4l2CameraCapture, V4l2VirtualCameraSink};

@@ -51,7 +51,7 @@ Name: "autostart"; Description: "Start SmartCam automatically when Windows start
 [Dirs]
 Name: "{app}"; Permissions: users-modify
 Name: "{app}\config"; Permissions: users-modify
-Name: "{commondocs}\..\SmartCam"; Permissions: users-modify
+Name: "{sd}\Users\Public\SmartCam"; Permissions: users-modify
 
 [InstallDelete]
 Type: filesandordirs; Name: "{localappdata}\Programs\SmartCam"
@@ -61,7 +61,7 @@ Type: files; Name: "{app}\smartcam_win_bridge.dll"
 [Files]
 Source: "target\release\SmartCam.exe"; DestDir: "{app}"; Flags: ignoreversion 64bit
 Source: "target\release\smartcam_mf_source.dll"; DestDir: "{app}"; Flags: ignoreversion 64bit
-Source: "target\release\smartcam_mf_source.dll"; DestDir: "{commondocs}\..\SmartCam"; Flags: ignoreversion 64bit
+Source: "target\release\smartcam_mf_source.dll"; DestDir: "{sd}\Users\Public\SmartCam"; Flags: ignoreversion 64bit
 Source: "platforms\windows\installer\smartcam_publisher.cer"; DestDir: "{app}"; Flags: ignoreversion
 Source: "assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "config\default_config.yaml"; DestDir: "{app}\config"; Flags: ignoreversion onlyifdoesntexist
@@ -82,12 +82,16 @@ Root: HKCU; Subkey: "SOFTWARE\Classes\CLSID\{#LegacyDShowCategoryId}\Instance\{#
 ; Media Foundation Virtual Camera COM InprocServer32 Registration (Single driver named "SmartCam")
 Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}"; ValueType: string; ValueName: ""; ValueData: "SmartCam"; Flags: uninsdeletekey
 Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}"; ValueType: string; ValueName: "FriendlyName"; ValueData: "SmartCam"; Flags: uninsdeletekey
-Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{commondocs}\..\SmartCam\smartcam_mf_source.dll"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{sd}\Users\Public\SmartCam\smartcam_mf_source.dll"; Flags: uninsdeletekey
 Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}\InprocServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Both"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}"; ValueType: string; ValueName: ""; ValueData: "SmartCam"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}"; ValueType: string; ValueName: "FriendlyName"; ValueData: "SmartCam"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{commondocs}\..\SmartCam\smartcam_mf_source.dll"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{sd}\Users\Public\SmartCam\smartcam_mf_source.dll"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}\InprocServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Both"; Flags: uninsdeletekey
+; Windows 11 Camera Privacy ConsentStore NonPackaged entry for SmartCam.exe
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\webcam\NonPackaged\C:#Program Files#SmartCam#SmartCam.exe"; ValueType: string; ValueName: "Value"; ValueData: "Allow"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\webcam\NonPackaged\C:#Program Files#SmartCam#SmartCam.exe"; ValueType: dword; ValueName: "LastUserAnnotatedLabel"; ValueData: "2"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\webcam\NonPackaged\C:#Program Files#SmartCam#SmartCam.exe"; ValueType: dword; ValueName: "PersistedInDatabase"; ValueData: "1"; Flags: uninsdeletekey
 ; Media Foundation FrameServer Mode Enablement
 Root: HKLM; Subkey: "SOFTWARE\Microsoft\Windows Media Foundation\Platform"; ValueType: dword; ValueName: "EnableFrameServerMode"; ValueData: "1"
 ; Optional Startup Registration
@@ -96,4 +100,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Run]
 Filename: "certutil.exe"; Parameters: "-addstore -f ""Root"" ""{app}\smartcam_publisher.cer"""; Flags: runhidden waituntilterminated; StatusMsg: "Installing SmartCam Root Certificate..."
 Filename: "certutil.exe"; Parameters: "-addstore -f ""TrustedPublisher"" ""{app}\smartcam_publisher.cer"""; Flags: runhidden waituntilterminated; StatusMsg: "Installing SmartCam Trusted Publisher Certificate..."
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--register-driver --accept-pefl"; Flags: runhidden waituntilterminated; StatusMsg: "Registering SmartCam Windows 11 Virtual Camera..."
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--unregister-driver --accept-pefl"; Flags: runhidden waituntilterminated; RunOnceId: "UnregisterSmartCamDriver"

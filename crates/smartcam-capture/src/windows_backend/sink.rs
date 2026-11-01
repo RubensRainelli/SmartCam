@@ -71,21 +71,33 @@ impl MfVirtualCameraSink {
         let public_dll = public_dir.join("smartcam_mf_source.dll");
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
+                let release_candidate = dir
+                    .parent()
+                    .and_then(|p| p.parent())
+                    .map(|p| p.join("release").join("smartcam_mf_source.dll"))
+                    .unwrap_or_default();
                 let candidates = [
                     dir.join("smartcam_mf_source.dll"),
+                    release_candidate,
                     dir.parent()
                         .map(|p| p.join("smartcam_mf_source.dll"))
                         .unwrap_or_default(),
                 ];
-                for src in candidates.iter().filter(|p| p.exists() && *p != &public_dll) {
+                for src in candidates.iter().filter(|p| p.is_file() && *p != &public_dll) {
                     let _ = std::fs::create_dir_all(&public_dir);
-                    if std::fs::copy(src, &public_dll).is_err() {
-                        let old_dll = public_dir.join("smartcam_mf_source.dll.old");
-                        let _ = std::fs::remove_file(&old_dll);
-                        if std::fs::rename(&public_dll, &old_dll).is_ok() {
-                            let _ = std::fs::copy(src, &public_dll);
-                        }
+                    let already_identical = match (std::fs::read(src), std::fs::read(&public_dll)) {
+                        (Ok(a), Ok(b)) => a == b,
+                        _ => false,
+                    };
+                    if already_identical {
+                        break;
                     }
+                    let old_dll = public_dir.join("smartcam_mf_source.dll.old");
+                    let _ = std::fs::remove_file(&old_dll);
+                    if public_dll.exists() {
+                        let _ = std::fs::rename(&public_dll, &old_dll);
+                    }
+                    let _ = std::fs::copy(src, &public_dll);
                     break;
                 }
             }
@@ -153,9 +165,12 @@ impl VirtualCameraSink for MfVirtualCameraSink {
                         .collect();
 
                     let mut vcam: Option<IMFVirtualCamera> = None;
-                    let create_hr = pfn(
+                    // Try System lifetime (1 = MFVirtualCameraLifetime_System) first so the virtual
+                    // camera remains persistently enumerable in Chrome/Edge/Teams even when SmartCam
+                    // is closed or in the background; fall back to Session lifetime (0) if needed.
+                    let mut create_hr = pfn(
                         0, // SoftwareCameraSource
-                        0, // Session lifetime
+                        1, // System lifetime (persistent across sessions)
                         0, // CurrentUser access
                         PCWSTR(wide_name.as_ptr()),
                         PCWSTR(wide_clsid.as_ptr()),
@@ -163,17 +178,35 @@ impl VirtualCameraSink for MfVirtualCameraSink {
                         1,
                         &mut vcam,
                     );
+                    if create_hr.is_err() {
+                        create_hr = pfn(
+                            0, // SoftwareCameraSource
+                            0, // Session lifetime fallback
+                            0, // CurrentUser access
+                            PCWSTR(wide_name.as_ptr()),
+                            PCWSTR(wide_clsid.as_ptr()),
+                            &KSCATEGORY_VIDEO_CAMERA,
+                            1,
+                            &mut vcam,
+                        );
+                    }
 
                     if create_hr.is_ok() {
                         if let Some(ref v) = vcam {
                             let start_hr = v.Start(None);
                             if start_hr.is_err() {
-                                eprintln!("[SmartCam][Sink] IMFVirtualCamera::Start failed: {:?}", start_hr);
+                                eprintln!(
+                                    "[SmartCam][Sink] IMFVirtualCamera::Start failed: {:?}",
+                                    start_hr
+                                );
                             }
                         }
                         self.vcam_handle = vcam;
                     } else {
-                        eprintln!("[SmartCam][Sink] MFCreateVirtualCamera failed: {:?}", create_hr);
+                        eprintln!(
+                            "[SmartCam][Sink] MFCreateVirtualCamera failed: {:?}",
+                            create_hr
+                        );
                     }
                 }
             }
@@ -194,7 +227,7 @@ impl VirtualCameraSink for MfVirtualCameraSink {
             let q1 = QueryPerformanceCounter(&mut qpc);
             let q2 = QueryPerformanceFrequency(&mut freq);
             if q1.is_ok() && q2.is_ok() && freq > 0 {
-                ((qpc as u64 * 10_000_000) / (freq as u64), true)
+                (((qpc as u128 * 10_000_000) / (freq as u128)) as u64, true)
             } else {
                 (0, false)
             }
@@ -230,13 +263,10 @@ impl VirtualCameraSink for MfVirtualCameraSink {
     }
 
     fn shutdown(&mut self) {
-        if let Some(vcam) = self.vcam_handle.take() {
-            unsafe {
-                let _ = vcam.Stop();
-                let _ = vcam.Remove();
-                let _ = vcam.Shutdown();
-            }
-        }
+        // Drop the COM reference without calling Stop() or Remove() so that a
+        // System-lifetime virtual camera stays registered and enumerable in browsers
+        // (Chrome, Edge, Meet, Teams, Zoom) even when SmartCam is closed.
+        let _ = self.vcam_handle.take();
 
         if let Some(dll) = self.vcam_dll.take() {
             unsafe {
@@ -263,5 +293,143 @@ impl VirtualCameraSink for MfVirtualCameraSink {
 impl Drop for MfVirtualCameraSink {
     fn drop(&mut self) {
         self.shutdown();
+    }
+}
+
+/// Ensures the Windows 11 Media Foundation Virtual Camera ("SmartCam") is registered and started
+/// with System lifetime (`MFVirtualCameraLifetime_System`) so that Chromium browsers (Google Chrome,
+/// Edge, Brave) and video apps (Teams, Meet, Zoom, OBS) always enumerate `"SmartCam"` even when the
+/// `SmartCam.exe` GUI is closed or minimized.
+pub fn ensure_system_virtual_camera_started() -> bool {
+    MfVirtualCameraSink::sync_staged_mf_source_dll();
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let mf_ok = MFStartup(MF_VERSION, 0).is_ok();
+
+        let mut dll = LoadLibraryW(w!("mfsensorgroup.dll")).ok();
+        if dll.is_none() {
+            dll = LoadLibraryW(w!("mfvirtualcamera.dll")).ok();
+        }
+        if dll.is_none() {
+            dll = LoadLibraryW(w!("mfplat.dll")).ok();
+        }
+
+        let mut ok = false;
+        if let Some(h_dll) = dll {
+            let proc_name = std::ffi::CString::new("MFCreateVirtualCamera").unwrap();
+            let proc =
+                GetProcAddress(h_dll, windows::core::PCSTR(proc_name.as_ptr() as *const u8));
+            if let Some(pfn_ptr) = proc {
+                let pfn: PfnMfCreateVirtualCamera = std::mem::transmute(pfn_ptr);
+                let wide_name: Vec<u16> = "SmartCam"
+                    .encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect();
+                let wide_clsid: Vec<u16> = SMARTCAM_MF_CLSID_STR
+                    .encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect();
+
+                let mut vcam: Option<IMFVirtualCamera> = None;
+                let mut hr = pfn(
+                    0, // SoftwareCameraSource
+                    1, // MFVirtualCameraLifetime_System
+                    0, // CurrentUser access
+                    PCWSTR(wide_name.as_ptr()),
+                    PCWSTR(wide_clsid.as_ptr()),
+                    &KSCATEGORY_VIDEO_CAMERA,
+                    1,
+                    &mut vcam,
+                );
+                if hr.is_err() {
+                    hr = pfn(
+                        0, // SoftwareCameraSource
+                        0, // MFVirtualCameraLifetime_Session fallback
+                        0, // CurrentUser access
+                        PCWSTR(wide_name.as_ptr()),
+                        PCWSTR(wide_clsid.as_ptr()),
+                        &KSCATEGORY_VIDEO_CAMERA,
+                        1,
+                        &mut vcam,
+                    );
+                }
+                if hr.is_ok() {
+                    if let Some(ref v) = vcam {
+                        ok = v.Start(None).is_ok();
+                    }
+                    // Intentionally drop `vcam` without Stop() or Remove() so System lifetime persists
+                    drop(vcam);
+                }
+            }
+            let _ = FreeLibrary(h_dll);
+        }
+
+        if mf_ok {
+            let _ = MFShutdown();
+        }
+        ok
+    }
+}
+
+/// Stops and removes the System-lifetime Windows 11 Media Foundation Virtual Camera ("SmartCam").
+/// Called only during driver uninstallation (`--unregister-driver`).
+pub fn remove_system_virtual_camera() -> bool {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let mf_ok = MFStartup(MF_VERSION, 0).is_ok();
+
+        let mut dll = LoadLibraryW(w!("mfsensorgroup.dll")).ok();
+        if dll.is_none() {
+            dll = LoadLibraryW(w!("mfvirtualcamera.dll")).ok();
+        }
+        if dll.is_none() {
+            dll = LoadLibraryW(w!("mfplat.dll")).ok();
+        }
+
+        let mut ok = false;
+        if let Some(h_dll) = dll {
+            let proc_name = std::ffi::CString::new("MFCreateVirtualCamera").unwrap();
+            let proc =
+                GetProcAddress(h_dll, windows::core::PCSTR(proc_name.as_ptr() as *const u8));
+            if let Some(pfn_ptr) = proc {
+                let pfn: PfnMfCreateVirtualCamera = std::mem::transmute(pfn_ptr);
+                let wide_name: Vec<u16> = "SmartCam"
+                    .encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect();
+                let wide_clsid: Vec<u16> = SMARTCAM_MF_CLSID_STR
+                    .encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect();
+
+                for lifetime in [1u32, 0u32] {
+                    let mut vcam: Option<IMFVirtualCamera> = None;
+                    let hr = pfn(
+                        0,
+                        lifetime,
+                        0,
+                        PCWSTR(wide_name.as_ptr()),
+                        PCWSTR(wide_clsid.as_ptr()),
+                        &KSCATEGORY_VIDEO_CAMERA,
+                        1,
+                        &mut vcam,
+                    );
+                    if hr.is_ok() {
+                        if let Some(ref v) = vcam {
+                            let _ = v.Stop();
+                            let _ = v.Remove();
+                            let _ = v.Shutdown();
+                            ok = true;
+                        }
+                    }
+                }
+            }
+            let _ = FreeLibrary(h_dll);
+        }
+
+        if mf_ok {
+            let _ = MFShutdown();
+        }
+        ok
     }
 }

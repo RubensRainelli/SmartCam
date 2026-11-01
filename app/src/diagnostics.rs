@@ -358,6 +358,24 @@ fn delete_legacy_dshow_keys(root: HKEY) {
     }
 }
 
+fn copy_dll_safely_if_changed(src_dll: &Path, dst_dll: &Path) -> bool {
+    if src_dll == dst_dll {
+        return true;
+    }
+    if let (Ok(src_bytes), Ok(dst_bytes)) = (std::fs::read(src_dll), std::fs::read(dst_dll)) {
+        if src_bytes == dst_bytes {
+            return true;
+        }
+    }
+    // Rename existing DLL to .old before copying so FrameServer/svchost never has a mapped image truncated in-place
+    let old_dll = dst_dll.with_extension("dll.old");
+    let _ = std::fs::remove_file(&old_dll);
+    if dst_dll.exists() {
+        let _ = std::fs::rename(dst_dll, &old_dll);
+    }
+    std::fs::copy(src_dll, dst_dll).is_ok()
+}
+
 fn stage_mf_source_dll_to_public(src_dll: &Path) -> PathBuf {
     let public_dir = PathBuf::from(r"C:\Users\Public\SmartCam");
     let _ = std::fs::create_dir_all(&public_dir);
@@ -365,36 +383,109 @@ fn stage_mf_source_dll_to_public(src_dll: &Path) -> PathBuf {
 
     // Also try updating C:\Program Files\SmartCam\smartcam_mf_source.dll if writable
     let prog_dll = PathBuf::from(r"C:\Program Files\SmartCam\smartcam_mf_source.dll");
-    if prog_dll.parent().map(|p| p.is_dir()).unwrap_or(false) && src_dll != prog_dll {
-        if std::fs::copy(src_dll, &prog_dll).is_err() {
-            let old_prog = PathBuf::from(r"C:\Program Files\SmartCam\smartcam_mf_source.dll.old");
-            let _ = std::fs::remove_file(&old_prog);
-            if std::fs::rename(&prog_dll, &old_prog).is_ok() {
-                let _ = std::fs::copy(src_dll, &prog_dll);
-            }
-        }
+    if prog_dll.parent().map(|p| p.is_dir()).unwrap_or(false) {
+        let _ = copy_dll_safely_if_changed(src_dll, &prog_dll);
     }
 
-    if src_dll == public_dll {
-        return public_dll;
-    }
-
-    if std::fs::copy(src_dll, &public_dll).is_ok() {
-        return public_dll;
-    }
-
-    // If locked by FrameServer, rename the loaded DLL to .old and copy fresh DLL into place
-    let old_dll = public_dir.join("smartcam_mf_source.dll.old");
-    let _ = std::fs::remove_file(&old_dll);
-    if std::fs::rename(&public_dll, &old_dll).is_ok() && std::fs::copy(src_dll, &public_dll).is_ok()
-    {
-        return public_dll;
-    }
-
-    if public_dll.is_file() {
+    if copy_dll_safely_if_changed(src_dll, &public_dll) || public_dll.is_file() {
         public_dll
     } else {
         src_dll.to_path_buf()
+    }
+}
+
+fn resolve_canonical_smartcam_exe(repo_root: &Path) -> PathBuf {
+    let pf = PathBuf::from(r"C:\Program Files\SmartCam\SmartCam.exe");
+    if pf.is_file() {
+        return pf;
+    }
+    std::env::current_exe().unwrap_or_else(|_| repo_root.join("target").join("release").join("SmartCam.exe"))
+}
+
+pub fn ensure_webcam_privacy_nonpackaged_entry(exe_path: &Path, force_allow: bool) {
+    let key_name = exe_path
+        .to_string_lossy()
+        .trim_start_matches(r"\\?\")
+        .replace('\\', "#");
+    let subkey = format!(
+        "Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\webcam\\NonPackaged\\{}",
+        key_name
+    );
+
+    let existing_val = reg_query_string(HKEY_CURRENT_USER, &subkey, "Value");
+    if force_allow || existing_val.is_none() {
+        let _ = reg_set_string(HKEY_CURRENT_USER, &subkey, "Value", "Allow");
+    }
+
+    unsafe {
+        let wsub = to_wstring(&subkey);
+        let mut hkey: HKEY = NULL;
+        let mut disp: DWORD = 0;
+        if RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            wsub.as_ptr(),
+            0,
+            std::ptr::null(),
+            0,
+            KEY_READ | KEY_WRITE | KEY_WOW64_64KEY,
+            std::ptr::null(),
+            &mut hkey,
+            &mut disp,
+        ) == 0
+            && !hkey.is_null()
+        {
+            // Windows FILETIME: 100-ns intervals since 1601-01-01 UTC
+            let unix_100ns = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| (d.as_nanos() / 100) as u64)
+                .unwrap_or(0);
+            let filetime_now: u64 = 116_444_736_000_000_000u64.saturating_add(unix_100ns);
+            let filetime_stop: u64 = filetime_now.saturating_add(10_000_000);
+
+            let w_start = to_wstring("LastUsedTimeStart");
+            let _ = RegSetValueExW(
+                hkey,
+                w_start.as_ptr(),
+                0,
+                REG_QWORD,
+                &filetime_now as *const u64 as *const BYTE,
+                std::mem::size_of::<u64>() as DWORD,
+            );
+
+            let w_stop = to_wstring("LastUsedTimeStop");
+            let _ = RegSetValueExW(
+                hkey,
+                w_stop.as_ptr(),
+                0,
+                REG_QWORD,
+                &filetime_stop as *const u64 as *const BYTE,
+                std::mem::size_of::<u64>() as DWORD,
+            );
+
+            let label: DWORD = 2;
+            let w_label = to_wstring("LastUserAnnotatedLabel");
+            let _ = RegSetValueExW(
+                hkey,
+                w_label.as_ptr(),
+                0,
+                REG_DWORD,
+                &label as *const DWORD as *const BYTE,
+                std::mem::size_of::<DWORD>() as DWORD,
+            );
+
+            let persisted: DWORD = 1;
+            let w_persisted = to_wstring("PersistedInDatabase");
+            let _ = RegSetValueExW(
+                hkey,
+                w_persisted.as_ptr(),
+                0,
+                REG_DWORD,
+                &persisted as *const DWORD as *const BYTE,
+                std::mem::size_of::<DWORD>() as DWORD,
+            );
+
+            RegCloseKey(hkey);
+        }
     }
 }
 
@@ -486,15 +577,9 @@ pub fn cleanup_stale_smartcam_registrations_and_privacy_entries(repo_root: &Path
         }
     }
 
-    // 3. Deduplicate Windows Camera Privacy NonPackaged entries so only the active SmartCam.exe remains
-    let canonical_exe = current_exe.unwrap_or_else(|| {
-        let pf = PathBuf::from(r"C:\Program Files\SmartCam\SmartCam.exe");
-        if pf.is_file() {
-            pf
-        } else {
-            repo_root.join("target").join("release").join("SmartCam.exe")
-        }
-    });
+    // 3. Deduplicate Windows Camera Privacy NonPackaged entries so only the canonical SmartCam.exe remains,
+    // and ensure that the canonical SmartCam.exe entry exists in Windows 11 Camera Privacy Settings.
+    let canonical_exe = resolve_canonical_smartcam_exe(repo_root);
     let keep_key_upper = canonical_exe
         .to_string_lossy()
         .trim_start_matches(r"\\?\")
@@ -503,6 +588,7 @@ pub fn cleanup_stale_smartcam_registrations_and_privacy_entries(repo_root: &Path
 
     cleanup_webcam_privacy_nonpackaged_in_hive(HKEY_CURRENT_USER, &keep_key_upper);
     cleanup_webcam_privacy_nonpackaged_in_hive(HKEY_LOCAL_MACHINE, &keep_key_upper);
+    ensure_webcam_privacy_nonpackaged_entry(&canonical_exe, false);
 
     // 4. Ensure COM virtual camera registration is clean and points to "SmartCam"
     let _ = ensure_virtual_camera_registered(repo_root, "out_avx2");
@@ -584,6 +670,7 @@ pub fn ensure_virtual_camera_registered(
         }
     }
 
+    let _ = smartcam_capture::ensure_system_virtual_camera_started();
     if ok_hkcu {
         Some(dll_path)
     } else {
@@ -673,6 +760,7 @@ pub fn invoke_driver_install(repo_root: &Path, variant: &str) -> (bool, String) 
 }
 
 pub fn invoke_driver_uninstall(repo_root: &Path) -> (bool, String) {
+    let _ = smartcam_capture::remove_system_virtual_camera();
     let dll = find_mf_source_dll(repo_root);
     unsafe {
         if dll.is_file() {
@@ -696,6 +784,8 @@ pub fn invoke_driver_uninstall(repo_root: &Path) -> (bool, String) {
 }
 
 pub fn open_windows11_camera_privacy_settings() {
+    let canonical_exe = resolve_canonical_smartcam_exe(Path::new("."));
+    ensure_webcam_privacy_nonpackaged_entry(&canonical_exe, true);
     unsafe {
         let op = to_wstring("open");
         let uri = to_wstring("ms-settings:privacy-webcam");
