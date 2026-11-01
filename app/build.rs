@@ -108,8 +108,8 @@ fn main() {
             "LegalCopyright",
             "Copyright (c) 2026 Rubens Rainelli (PEFL v1.0)",
         );
-        res.set("FileVersion", "2.0.0.0");
-        res.set("ProductVersion", "2.0.0.0");
+        res.set("FileVersion", "2.1.0.0");
+        res.set("ProductVersion", "2.1.0.0");
         let _ = res.compile();
     }
 }

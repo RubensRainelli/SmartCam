@@ -221,12 +221,21 @@ impl VirtualCameraSink for MfVirtualCameraSink {
             None => return false,
         };
 
+        static QPC_FREQ: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+        let freq = *QPC_FREQ.get_or_init(|| {
+            let mut f = 0i64;
+            unsafe {
+                if QueryPerformanceFrequency(&mut f).is_ok() && f > 0 {
+                    f
+                } else {
+                    0
+                }
+            }
+        });
+
         let mut qpc = 0i64;
-        let mut freq = 0i64;
         let (ts_100ns, ok_qpc) = unsafe {
-            let q1 = QueryPerformanceCounter(&mut qpc);
-            let q2 = QueryPerformanceFrequency(&mut freq);
-            if q1.is_ok() && q2.is_ok() && freq > 0 {
+            if freq > 0 && QueryPerformanceCounter(&mut qpc).is_ok() {
                 (((qpc as u128 * 10_000_000) / (freq as u128)) as u64, true)
             } else {
                 (0, false)

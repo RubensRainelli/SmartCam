@@ -486,10 +486,15 @@ impl SharedFrameIpc {
             return false;
         }
 
-        for _ in 0..3 {
+        for attempt in 0..64 {
             let seq_before = hdr.sequence_counter.load(Ordering::SeqCst);
             if (seq_before & 1) != 0 {
-                std::thread::yield_now();
+                if attempt < 8 {
+                    std::hint::spin_loop();
+                    std::thread::yield_now();
+                } else {
+                    std::thread::sleep(std::time::Duration::from_micros(150));
+                }
                 continue;
             }
 
@@ -513,6 +518,13 @@ impl SharedFrameIpc {
                 *out_height = h;
                 *out_timestamp_100ns = ts;
                 return true;
+            }
+
+            if attempt < 8 {
+                std::hint::spin_loop();
+                std::thread::yield_now();
+            } else {
+                std::thread::sleep(std::time::Duration::from_micros(150));
             }
         }
 

@@ -153,9 +153,24 @@ pub fn crop_zoom_image_social(
 
     let max_sx = src_w.saturating_sub(1);
     let max_sy = src_h.saturating_sub(1);
+    let inv_dst_w = 1.0 / (dst_w.max(1) as f32);
+    let inv_dst_h = 1.0 / (dst_h.max(1) as f32);
+
+    // Precompute horizontal interpolation table once across the width
+    let mut x_table: Vec<(usize, usize, u32, u32)> = Vec::with_capacity(dst_w as usize);
+    for x in 0..dst_w {
+        let fx = (cx as f32) + ((x as f32) + 0.5) * (cw as f32) * inv_dst_w - 0.5;
+        let raw_x0 = (fx.floor().max(0.0) as u32).min(max_sx);
+        let raw_x1 = (raw_x0 + 1).min(max_sx);
+        let wx = ((fx - (raw_x0 as f32)).clamp(0.0, 1.0) * 256.0) as u32;
+        let inv_wx = 256 - wx;
+        let x0 = if mirror_h { max_sx - raw_x0 } else { raw_x0 };
+        let x1 = if mirror_h { max_sx - raw_x1 } else { raw_x1 };
+        x_table.push(((x0 as usize) * 4, (x1 as usize) * 4, wx, inv_wx));
+    }
 
     for y in 0..dst_h {
-        let fy = (cy as f32) + ((y as f32) + 0.5) * (ch as f32) / (dst_h.max(1) as f32) - 0.5;
+        let fy = (cy as f32) + ((y as f32) + 0.5) * (ch as f32) * inv_dst_h - 0.5;
         let raw_y0 = (fy.floor().max(0.0) as u32).min(max_sy);
         let raw_y1 = (raw_y0 + 1).min(max_sy);
         let wy = ((fy - (raw_y0 as f32)).clamp(0.0, 1.0) * 256.0) as u32;
@@ -163,33 +178,37 @@ pub fn crop_zoom_image_social(
         let y0 = if mirror_v { max_sy - raw_y0 } else { raw_y0 };
         let y1 = if mirror_v { max_sy - raw_y1 } else { raw_y1 };
 
-        for x in 0..dst_w {
-            let fx = (cx as f32) + ((x as f32) + 0.5) * (cw as f32) / (dst_w.max(1) as f32) - 0.5;
-            let raw_x0 = (fx.floor().max(0.0) as u32).min(max_sx);
-            let raw_x1 = (raw_x0 + 1).min(max_sx);
-            let wx = ((fx - (raw_x0 as f32)).clamp(0.0, 1.0) * 256.0) as u32;
-            let inv_wx = 256 - wx;
-            let x0 = if mirror_h { max_sx - raw_x0 } else { raw_x0 };
-            let x1 = if mirror_h { max_sx - raw_x1 } else { raw_x1 };
+        let row0_off = (y0 as usize) * (src_w as usize) * 4;
+        let row1_off = (y1 as usize) * (src_w as usize) * 4;
+        let dst_row_off = (y as usize) * (dst_w as usize) * 4;
 
+        for (x, &(x0_off, x1_off, wx, inv_wx)) in x_table.iter().enumerate() {
             let w00 = inv_wx * inv_wy;
             let w10 = wx * inv_wy;
             let w01 = inv_wx * wy;
             let w11 = wx * wy;
 
-            let i00 = ((y0 * src_w + x0) * 4) as usize;
-            let i10 = ((y0 * src_w + x1) * 4) as usize;
-            let i01 = ((y1 * src_w + x0) * 4) as usize;
-            let i11 = ((y1 * src_w + x1) * 4) as usize;
-            let d_idx = ((y * dst_w + x) * 4) as usize;
+            let i00 = row0_off + x0_off;
+            let i10 = row0_off + x1_off;
+            let i01 = row1_off + x0_off;
+            let i11 = row1_off + x1_off;
+            let d_idx = dst_row_off + x * 4;
 
-            for c in 0..3 {
-                let val = (src[i00 + c] as u32) * w00
-                    + (src[i10 + c] as u32) * w10
-                    + (src[i01 + c] as u32) * w01
-                    + (src[i11 + c] as u32) * w11;
-                dst[d_idx + c] = (val >> 16) as u8;
-            }
+            dst[d_idx + 0] = (((src[i00 + 0] as u32) * w00
+                + (src[i10 + 0] as u32) * w10
+                + (src[i01 + 0] as u32) * w01
+                + (src[i11 + 0] as u32) * w11)
+                >> 16) as u8;
+            dst[d_idx + 1] = (((src[i00 + 1] as u32) * w00
+                + (src[i10 + 1] as u32) * w10
+                + (src[i01 + 1] as u32) * w01
+                + (src[i11 + 1] as u32) * w11)
+                >> 16) as u8;
+            dst[d_idx + 2] = (((src[i00 + 2] as u32) * w00
+                + (src[i10 + 2] as u32) * w10
+                + (src[i01 + 2] as u32) * w01
+                + (src[i11 + 2] as u32) * w11)
+                >> 16) as u8;
             dst[d_idx + 3] = 255;
         }
     }
@@ -441,17 +460,8 @@ pub fn crop_scale_bgra_scalar(
             )
         }
         CropStrategy::Letterbox => {
-            // Fill background with black
-            for y in 0..dst_h {
-                let off = (y * stride_dst) as usize;
-                for x in 0..dst_w {
-                    let px = off + (x as usize) * 4;
-                    dst[px + 0] = 0;
-                    dst[px + 1] = 0;
-                    dst[px + 2] = 0;
-                    dst[px + 3] = 255;
-                }
-            }
+            // Fill background with black using fast 32-bit slice fill
+            crate::compositor::fill_solid_bg(dst, dst_w, dst_h, stride_dst, 0, 0, 0, true);
 
             let src_full = CropRect {
                 x: 0,

@@ -117,18 +117,16 @@ pub unsafe extern "C" fn smartcam_win_camera_read_frame(
         return 0;
     }
     let h = &mut *(handle as *mut CameraHandle);
-    if let Some((w, h_res)) = h.capture.read_frame(&mut h.scratch) {
-        let needed = (w as usize) * (h_res as usize) * 4;
+    if let Some((w, h_res)) =
+        h.capture
+            .read_frame_into_raw(dst_bgra, dst_cap as usize, &mut h.scratch)
+    {
         if !out_actual_w.is_null() {
             *out_actual_w = w;
         }
         if !out_actual_h.is_null() {
             *out_actual_h = h_res;
         }
-        if needed > (dst_cap as usize) || h.scratch.len() < needed {
-            return 0;
-        }
-        std::ptr::copy_nonoverlapping(h.scratch.as_ptr(), dst_bgra, needed);
         1
     } else {
         0

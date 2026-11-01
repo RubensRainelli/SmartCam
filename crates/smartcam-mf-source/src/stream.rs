@@ -13,7 +13,10 @@
  * The full license can be found in the LICENSE file.
  */
 
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::Ordering,
+    Arc, Mutex,
+};
 use windows::{
     core::{implement, IUnknown, Interface, Result, GUID, HRESULT},
     Win32::{
@@ -57,6 +60,17 @@ struct StreamInner {
     ipc: Option<SharedFrameIpc>,
     scratch_buf: Vec<u8>,
     bgra_frame_buf: Vec<u8>,
+    has_valid_frame: bool,
+    last_valid_width: u32,
+    last_valid_height: u32,
+    last_ipc_seq: i64,
+    last_frame_index: u64,
+    nv12_cache_buf: Vec<u8>,
+    nv12_cache_seq: i64,
+    nv12_cache_frame_idx: u64,
+    nv12_cache_w: u32,
+    nv12_cache_h: u32,
+    standby_rendered_dim: (u32, u32),
     sample_count: u64,
     width: u32,
     height: u32,
@@ -110,6 +124,17 @@ impl SmartCamMfMediaStream {
             ipc,
             scratch_buf: Vec::new(),
             bgra_frame_buf: Vec::new(),
+            has_valid_frame: false,
+            last_valid_width: 0,
+            last_valid_height: 0,
+            last_ipc_seq: 0,
+            last_frame_index: 0,
+            nv12_cache_buf: Vec::new(),
+            nv12_cache_seq: -1,
+            nv12_cache_frame_idx: u64::MAX,
+            nv12_cache_w: 0,
+            nv12_cache_h: 0,
+            standby_rendered_dim: (0, 0),
             sample_count: 0,
             width: DEFAULT_STREAM_WIDTH,
             height: DEFAULT_STREAM_HEIGHT,
@@ -296,19 +321,23 @@ impl SmartCamMfMediaStream {
         }
     }
 
-    pub fn render_standby_pattern(dst: *mut u8, width: u32, height: u32, sample_count: u64) {
-        let bar_offset = ((sample_count * 4) % (width as u64)) as u32;
+    pub fn render_standby_pattern(dst: *mut u8, width: u32, height: u32, _sample_count: u64) {
+        let count = (width as usize) * (height as usize);
+        if dst.is_null() || count == 0 {
+            return;
+        }
+        let pixel = u32::from_le_bytes([38, 24, 18, 255]); // Dark Studio Slate BGRA
         unsafe {
-            for y in 0..height {
-                let row = dst.add((y as usize) * (width as usize) * 4);
-                let grad_y = ((y * 180) / height + 30) as u8;
-                for x in 0..width {
-                    let is_pulse = ((x + bar_offset) % 120) < 6;
-                    let px = row.add((x as usize) * 4);
-                    *px = if is_pulse { 240 } else { 56 }; // B
-                    *px.add(1) = if is_pulse { 200 } else { grad_y }; // G
-                    *px.add(2) = if is_pulse { 80 } else { 24 }; // R
-                    *px.add(3) = 255; // A
+            if (dst as usize) % align_of::<u32>() == 0 {
+                let slice_u32 = std::slice::from_raw_parts_mut(dst as *mut u32, count);
+                slice_u32.fill(pixel);
+            } else {
+                for i in 0..count {
+                    let px = dst.add(i * 4);
+                    *px = 38;
+                    *px.add(1) = 24;
+                    *px.add(2) = 18;
+                    *px.add(3) = 255;
                 }
             }
         }
@@ -586,29 +615,41 @@ impl IMFMediaStream_Impl for SmartCamMfMediaStream_Impl {
                 ref ipc,
                 ref mut scratch_buf,
                 ref mut bgra_frame_buf,
+                ref mut has_valid_frame,
+                ref mut last_valid_width,
+                ref mut last_valid_height,
+                ref mut last_ipc_seq,
+                ref mut last_frame_index,
+                ref mut standby_rendered_dim,
                 ..
             } = *inner;
 
             if let Some(ref ipc_ref) = *ipc {
-                ipc_ref.touch_consumer_heartbeat();
                 if let Some(hdr) = ipc_ref.header() {
                     if hdr.magic == SHARED_FRAME_MAGIC && hdr.width > 0 && hdr.height > 0 {
-                        let mut r_w = 0u32;
-                        let mut r_h = 0u32;
-                        let mut r_ts = 0u64;
-
-                        if hdr.width == width && hdr.height == height {
-                            if ipc_ref.read_frame(
-                                &mut bgra_frame_buf[..bgra_bytes],
-                                &mut r_w,
-                                &mut r_h,
-                                &mut r_ts,
-                            ) {
-                                got_ipc_frame = true;
-                            }
+                        let cur_seq = hdr.sequence_counter.load(Ordering::Acquire);
+                        let cur_fidx = hdr.frame_index;
+                        if cur_seq > 0
+                            && (cur_seq & 1) == 0
+                            && cur_seq == *last_ipc_seq
+                            && cur_fidx == *last_frame_index
+                            && *has_valid_frame
+                            && *last_valid_width == width
+                            && *last_valid_height == height
+                        {
+                            // Producer has not published a newer frame since the last read;
+                            // reuse the already-validated frame in `bgra_frame_buf` without re-copying.
+                            ipc_ref.touch_consumer_heartbeat();
+                            got_ipc_frame = true;
                         } else {
+                            let mut r_w = 0u32;
+                            let mut r_h = 0u32;
+                            let mut r_ts = 0u64;
+
+                            // Always read into `scratch_buf` first so that a mid-copy seqlock
+                            // collision never partially overwrites `bgra_frame_buf`.
                             let src_bytes = (hdr.width as usize) * (hdr.height as usize) * 4;
-                            if src_bytes <= MAX_SHARED_FRAME_BYTES {
+                            if src_bytes > 0 && src_bytes <= MAX_SHARED_FRAME_BYTES {
                                 if scratch_buf.len() < src_bytes {
                                     scratch_buf.resize(src_bytes, 0);
                                 }
@@ -620,43 +661,117 @@ impl IMFMediaStream_Impl for SmartCamMfMediaStream_Impl {
                                 ) && r_w > 0
                                     && r_h > 0
                                 {
-                                    let dst_ptr = bgra_frame_buf.as_mut_ptr();
-                                    for dy in 0..height {
-                                        let sy = (dy * r_h) / height;
-                                        let dst_row =
-                                            unsafe { dst_ptr.add((dy as usize) * (width as usize) * 4) };
-                                        let src_row = unsafe {
-                                            scratch_buf.as_ptr().add((sy as usize) * (r_w as usize) * 4)
-                                        };
-                                        for dx in 0..width {
-                                            let sx = (dx * r_w) / width;
-                                            unsafe {
-                                                let spx = src_row.add((sx as usize) * 4);
-                                                let dpx = dst_row.add((dx as usize) * 4);
-                                                *dpx = *spx;
-                                                *dpx.add(1) = *spx.add(1);
-                                                *dpx.add(2) = *spx.add(2);
-                                                *dpx.add(3) = 255;
+                                    let read_bytes = (r_w as usize) * (r_h as usize) * 4;
+                                    if r_w == width && r_h == height && read_bytes == bgra_bytes {
+                                        bgra_frame_buf[..bgra_bytes]
+                                            .copy_from_slice(&scratch_buf[..bgra_bytes]);
+                                    } else {
+                                        let dst_ptr = bgra_frame_buf.as_mut_ptr();
+                                        for dy in 0..height {
+                                            let sy = (dy * r_h) / height;
+                                            let dst_row = unsafe {
+                                                dst_ptr.add((dy as usize) * (width as usize) * 4)
+                                            };
+                                            let src_row = unsafe {
+                                                scratch_buf
+                                                    .as_ptr()
+                                                    .add((sy as usize) * (r_w as usize) * 4)
+                                            };
+                                            for dx in 0..width {
+                                                let sx = (dx * r_w) / width;
+                                                unsafe {
+                                                    let spx = src_row.add((sx as usize) * 4);
+                                                    let dpx = dst_row.add((dx as usize) * 4);
+                                                    *dpx = *spx;
+                                                    *dpx.add(1) = *spx.add(1);
+                                                    *dpx.add(2) = *spx.add(2);
+                                                    *dpx.add(3) = 255;
+                                                }
                                             }
                                         }
                                     }
+                                    *has_valid_frame = true;
+                                    *last_valid_width = width;
+                                    *last_valid_height = height;
+                                    *last_ipc_seq =
+                                        hdr.sequence_counter.load(Ordering::Acquire) & !1;
+                                    *last_frame_index = hdr.frame_index;
+                                    *standby_rendered_dim = (0, 0);
                                     got_ipc_frame = true;
                                 }
+                            } else {
+                                ipc_ref.touch_consumer_heartbeat();
                             }
                         }
+                    } else {
+                        ipc_ref.touch_consumer_heartbeat();
                     }
                 }
             }
         }
 
+        // If `read_frame` transiently failed (e.g., producer mid-write collision), preserve the
+        // last valid frame in `bgra_frame_buf` ("Last-Good-Frame Hold") instead of flashing standby.
+        if !got_ipc_frame
+            && inner.has_valid_frame
+            && inner.last_valid_width == width
+            && inner.last_valid_height == height
+        {
+            got_ipc_frame = true;
+        }
+
         let sample_idx = inner.sample_count;
-        if !got_ipc_frame {
+        if !got_ipc_frame && inner.standby_rendered_dim != (width, height) {
             SmartCamMfMediaStream::render_standby_pattern(
                 inner.bgra_frame_buf.as_mut_ptr(),
                 width,
                 height,
                 sample_idx,
             );
+            inner.standby_rendered_dim = (width, height);
+            inner.nv12_cache_seq = -2;
+        }
+
+        // If NV12 is negotiated, maintain a cached tight NV12 buffer so repeated consumer requests
+        // for the same producer frame copy pre-converted planes instead of recomputing BT.601 math.
+        let nv12_tight_bytes = ((width as usize) * (height as usize) * 3) / 2;
+        if is_nv12 {
+            let cache_seq_key = if got_ipc_frame {
+                inner.last_ipc_seq
+            } else {
+                -2
+            };
+            let cache_fidx_key = if got_ipc_frame {
+                inner.last_frame_index
+            } else {
+                0
+            };
+            if inner.nv12_cache_seq != cache_seq_key
+                || inner.nv12_cache_frame_idx != cache_fidx_key
+                || inner.nv12_cache_w != width
+                || inner.nv12_cache_h != height
+                || inner.nv12_cache_buf.len() < nv12_tight_bytes
+            {
+                if inner.nv12_cache_buf.len() < nv12_tight_bytes {
+                    inner.nv12_cache_buf.resize(nv12_tight_bytes, 0);
+                }
+                let StreamInner {
+                    ref bgra_frame_buf,
+                    ref mut nv12_cache_buf,
+                    ..
+                } = *inner;
+                SmartCamMfMediaStream::bgra_to_nv12_pitched(
+                    &bgra_frame_buf[..bgra_bytes],
+                    nv12_cache_buf.as_mut_ptr(),
+                    width as usize,
+                    width,
+                    height,
+                );
+                inner.nv12_cache_seq = cache_seq_key;
+                inner.nv12_cache_frame_idx = cache_fidx_key;
+                inner.nv12_cache_w = width;
+                inner.nv12_cache_h = height;
+            }
         }
 
         // Allocate sample from FrameServer's provided IMFVideoSampleAllocator if available,
@@ -712,25 +827,53 @@ impl IMFMediaStream_Impl for SmartCamMfMediaStream_Impl {
             }
 
             let abs_pitch = pitch.unsigned_abs() as usize;
+            let w_usize = width as usize;
+            let h_usize = height as usize;
             if is_nv12 {
-                SmartCamMfMediaStream::bgra_to_nv12_pitched(
-                    &inner.bgra_frame_buf[..bgra_bytes],
-                    scanline,
-                    abs_pitch,
-                    width,
-                    height,
-                );
-            } else {
-                let row_bytes = (width as usize) * 4;
-                for y in 0..(height as usize) {
+                if abs_pitch == w_usize {
                     unsafe {
-                        let src_row = inner.bgra_frame_buf.as_ptr().add(y * row_bytes);
-                        let dst_row = if pitch >= 0 {
-                            scanline.add(y * abs_pitch)
-                        } else {
-                            scanline.sub(y * abs_pitch)
-                        };
-                        std::ptr::copy_nonoverlapping(src_row, dst_row, row_bytes.min(abs_pitch));
+                        std::ptr::copy_nonoverlapping(
+                            inner.nv12_cache_buf.as_ptr(),
+                            scanline,
+                            nv12_tight_bytes,
+                        );
+                    }
+                } else {
+                    let row_copy = w_usize.min(abs_pitch);
+                    let total_nv12_rows = h_usize + h_usize / 2;
+                    for r in 0..total_nv12_rows {
+                        unsafe {
+                            let src_row = inner.nv12_cache_buf.as_ptr().add(r * w_usize);
+                            let dst_row = scanline.add(r * abs_pitch);
+                            std::ptr::copy_nonoverlapping(src_row, dst_row, row_copy);
+                        }
+                    }
+                }
+            } else {
+                let row_bytes = w_usize * 4;
+                if pitch >= 0 && abs_pitch == row_bytes {
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            inner.bgra_frame_buf.as_ptr(),
+                            scanline,
+                            bgra_bytes,
+                        );
+                    }
+                } else {
+                    for y in 0..h_usize {
+                        unsafe {
+                            let src_row = inner.bgra_frame_buf.as_ptr().add(y * row_bytes);
+                            let dst_row = if pitch >= 0 {
+                                scanline.add(y * abs_pitch)
+                            } else {
+                                scanline.sub(y * abs_pitch)
+                            };
+                            std::ptr::copy_nonoverlapping(
+                                src_row,
+                                dst_row,
+                                row_bytes.min(abs_pitch),
+                            );
+                        }
                     }
                 }
             }
@@ -744,13 +887,13 @@ impl IMFMediaStream_Impl for SmartCamMfMediaStream_Impl {
                 media_buffer.Lock(&mut raw_ptr, None, None)?;
             }
             let buffer_size = if is_nv12 {
-                SmartCamMfMediaStream::bgra_to_nv12_pitched(
-                    &inner.bgra_frame_buf[..bgra_bytes],
-                    raw_ptr,
-                    width as usize,
-                    width,
-                    height,
-                );
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        inner.nv12_cache_buf.as_ptr(),
+                        raw_ptr,
+                        nv12_tight_bytes,
+                    );
+                }
                 (width * height * 3) / 2
             } else {
                 unsafe {

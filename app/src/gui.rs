@@ -199,6 +199,7 @@ pub struct AppGuiState {
     pub plugin_registry: PluginRegistry,
     pub benchmark_report: HardwareBenchmarkReport,
     pub raw_capture_buf: Vec<u8>,
+    pub has_real_camera_frame: bool,
     pub preview_buf: Vec<u8>,
     pub raw_w: u32,
     pub raw_h: u32,
@@ -259,6 +260,8 @@ pub struct AppGuiState {
     pub font_btn: HFONT,
     pub font_small: HFONT,
     pub crop_modal_scratch: Vec<u8>,
+    pub cached_qr_matrix: Option<(String, usize, Vec<bool>)>,
+    pub ui_needs_full_repaint: bool,
 }
 
 static mut GLOBAL_APP: *mut AppGuiState = std::ptr::null_mut();
@@ -396,6 +399,7 @@ impl AppGuiState {
             plugin_registry,
             benchmark_report,
             raw_capture_buf: Vec::new(),
+            has_real_camera_frame: false,
             preview_buf: Vec::new(),
             raw_w: 1920,
             raw_h: 1080,
@@ -457,6 +461,8 @@ impl AppGuiState {
             font_btn: std::ptr::null_mut(),
             font_small: std::ptr::null_mut(),
             crop_modal_scratch: Vec::new(),
+            cached_qr_matrix: None,
+            ui_needs_full_repaint: true,
         }
     }
 
@@ -521,6 +527,7 @@ impl AppGuiState {
         self.face_calib_modal_open = false;
         self.show_advanced = false;
         self.wizard_step = 0;
+        self.ui_needs_full_repaint = true;
     }
 
     pub fn capture_face_calib_snapshot(&mut self) {
@@ -677,13 +684,19 @@ impl AppGuiState {
         ) {
             self.raw_w = w;
             self.raw_h = h;
+            self.has_real_camera_frame = true;
         } else if let Some((w, h)) =
             self.pipeline
                 .read_camera_frame(&mut self.raw_capture_buf, target_w, target_h)
         {
             self.raw_w = w;
             self.raw_h = h;
-        } else {
+            self.has_real_camera_frame = true;
+        } else if !(self.has_real_camera_frame
+            && self.raw_w > 0
+            && self.raw_h > 0
+            && self.raw_capture_buf.len() >= (self.raw_w as usize) * (self.raw_h as usize) * 4)
+        {
             self.raw_w = target_w;
             self.raw_h = target_h;
             generate_synthetic_bgra_frame(
@@ -721,6 +734,7 @@ impl AppGuiState {
                     self.status_message =
                         "✅ Sfondo Reale Catturato (Telo Virtuale attivo)! ⚠️ Tieni webcam/notebook su una superficie statica e ferma."
                             .to_string();
+                    self.ui_needs_full_repaint = true;
                 }
             }
         }
@@ -746,13 +760,15 @@ impl AppGuiState {
         let out_slice = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
         self.pipeline.push_frame_to_sink(out_slice, ow, oh, fps);
 
-        // Prepare GUI preview buffer (includes preview-only overlays like Teleprompter when enabled)
-        self.preview_buf.resize(self.pipeline.out_buf.len(), 255);
-        self.preview_buf.copy_from_slice(&self.pipeline.out_buf);
-        if self
-            .plugin_registry
-            .is_plugin_enabled(crate::plugins::PLUGIN_ID_TELEPROMPTER)
+        // Prepare GUI preview buffer only when visible and preview-only overlays (e.g. Teleprompter) are enabled;
+        // otherwise `paint_main_window` draws directly from `self.pipeline.out_buf` (zero-copy!).
+        if !self.minimized_to_tray
+            && self
+                .plugin_registry
+                .is_plugin_enabled(crate::plugins::PLUGIN_ID_TELEPROMPTER)
         {
+            self.preview_buf.resize(self.pipeline.out_buf.len(), 255);
+            self.preview_buf.copy_from_slice(&self.pipeline.out_buf);
             self.plugin_registry.apply_active_video_filter_plugins(
                 &mut self.preview_buf,
                 None,
@@ -760,6 +776,8 @@ impl AppGuiState {
                 oh,
                 true,
             );
+        } else if !self.preview_buf.is_empty() {
+            self.preview_buf.clear();
         }
 
         self.frame_counter += 1;
@@ -794,6 +812,7 @@ impl AppGuiState {
         );
         let _ = self.cfg.save_to_file(&self.config_path);
         self.status_message = msg.to_string();
+        self.ui_needs_full_repaint = true;
     }
 
     pub fn sync_and_save_plugins(&mut self, msg: &str) {
@@ -808,6 +827,7 @@ impl AppGuiState {
         let _ = self.plugin_registry.save_state(&self.repo_root);
         let _ = self.cfg.save_to_file(&self.config_path);
         self.status_message = msg.to_string();
+        self.ui_needs_full_repaint = true;
     }
 
     pub fn switch_camera(&mut self, new_index: u32) {
@@ -822,6 +842,7 @@ impl AppGuiState {
             let _ = self.plugin_registry.save_state(&self.repo_root);
         }
         self.cfg.camera_input.device_index = new_index;
+        self.has_real_camera_frame = false;
         self.pipeline.clear_reference_background();
         let opened = self.pipeline.open_hardware_camera(
             self.cfg.camera_input.device_index,
@@ -841,9 +862,11 @@ impl AppGuiState {
                 "⚠️ Webcam occupata da un'altra app o permessi bloccati (Flusso Demo attivo)."
                     .to_string();
         }
+        self.ui_needs_full_repaint = true;
     }
 
     pub fn handle_action(&mut self, hwnd: HWND, action: UiAction) {
+        self.ui_needs_full_repaint = true;
         match action {
             UiAction::PrevCamera => {
                 if !self.diag.physical_cameras.is_empty() {
@@ -2600,6 +2623,7 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
         app.backbuf_old_bmp = SelectObject(app.backbuf_dc, app.backbuf_bmp);
         app.backbuf_w = win_w;
         app.backbuf_h = win_h;
+        app.ui_needs_full_repaint = true;
     }
     let mem_dc = app.backbuf_dc;
 
@@ -2615,19 +2639,27 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
     let f_btn = app.font_btn;
     let f_small = app.font_small;
 
-    app.hit_zones.clear();
-    app.dropdown_overlay_zones.clear();
-
-    // Background Fill
-    let bg_main = CreateSolidBrush(rgb(11, 15, 25));
-    FillRect(mem_dc, &client_rc, bg_main);
-    DeleteObject(bg_main);
+    let monitor_only_fast_paint = !app.ui_needs_full_repaint
+        && !app.any_modal_open()
+        && app.open_dropdown.is_none()
+        && !app.hit_zones.is_empty()
+        && ps.rcPaint.top >= 96
+        && ps.rcPaint.bottom <= 490;
 
     SetBkMode(mem_dc, TRANSPARENT);
 
-    // ========================================================================
-    // 1. Top Header Bar (`y = 0..48`, Zero Overlap)
-    // ========================================================================
+    if !monitor_only_fast_paint {
+        app.hit_zones.clear();
+        app.dropdown_overlay_zones.clear();
+
+        // Background Fill
+        let bg_main = CreateSolidBrush(rgb(11, 15, 25));
+        FillRect(mem_dc, &client_rc, bg_main);
+        DeleteObject(bg_main);
+
+        // ========================================================================
+        // 1. Top Header Bar (`y = 0..48`, Zero Overlap)
+        // ========================================================================
     let header_rc = RECT::new(0, 0, win_w, 48);
     let header_br = CreateSolidBrush(rgb(18, 25, 40));
     FillRect(mem_dc, &header_rc, header_br);
@@ -2872,6 +2904,7 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
         },
         f_small,
     );
+    }
 
     // ========================================================================
     // 3. Central Studio Live Video Monitor (`y = 96..490`, Fixed Coordinates)
@@ -3070,6 +3103,22 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
         rgb(148, 163, 184),
         f_small,
     );
+
+    if monitor_only_fast_paint {
+        BitBlt(
+            hdc_win,
+            monitor_rc.left,
+            monitor_rc.top,
+            monitor_rc.width(),
+            monitor_rc.height(),
+            mem_dc,
+            monitor_rc.left,
+            monitor_rc.top,
+            SRCCOPY,
+        );
+        EndPaint(hwnd, &ps);
+        return;
+    }
 
     // ========================================================================
     // 4. Quick Controls Panel Below Video (`y = 494..634`, 3 Clean Rows, Zero Overlap)
@@ -3543,6 +3592,7 @@ unsafe fn paint_main_window(hwnd: HWND, app: &mut AppGuiState) {
         paint_open_dropdown_menu(mem_dc, app, open_kind, anchor_rc, win_h, f_small);
     }
 
+    app.ui_needs_full_repaint = false;
     BitBlt(hdc_win, 0, 0, win_w, win_h, mem_dc, 0, 0, SRCCOPY);
 
     EndPaint(hwnd, &ps);
@@ -4125,13 +4175,22 @@ unsafe fn paint_plugins_modal_overlay(
         if is_phone {
             let srv_url = app.plugin_registry.phone_server_url();
             let srv_running = app.plugin_registry.is_phone_server_running();
-            let rx_frames = app.plugin_registry.phone_connected_frames();
             let tcp_conns = app.plugin_registry.phone_tcp_connections();
             let last_log = app.plugin_registry.phone_last_client_log();
             let cur_port = app.plugin_registry.phone_server_port();
 
             // Draw Scannable QR Code on the right side of the Smartphone card (`item_rc.right - 118 .. item_rc.right - 14`)
-            let (qr_n, qr_mods) = crate::plugins::generate_qr_code_matrix(&srv_url);
+            if app
+                .cached_qr_matrix
+                .as_ref()
+                .map(|(u, _, _)| u != &srv_url)
+                .unwrap_or(true)
+            {
+                let (n, mods) = crate::plugins::generate_qr_code_matrix(&srv_url);
+                app.cached_qr_matrix = Some((srv_url.clone(), n, mods));
+            }
+            let (_, qr_n, ref qr_mods) = app.cached_qr_matrix.as_ref().unwrap();
+            let qr_n = *qr_n;
             let mod_px = 3i32;
             let quiet = 2i32;
             let qr_box_sz = (qr_n as i32 + quiet * 2) * mod_px; // 29 * 3 = 87 px
@@ -4212,8 +4271,8 @@ unsafe fn paint_plugins_modal_overlay(
             );
 
             let telemetry_txt = format!(
-                "📡 Tentativi TCP ricevuti: {}  •  Frame video: {}  •  Log: {}",
-                tcp_conns, rx_frames, last_log
+                "📡 Tentativi TCP ricevuti: {}  •  Log: {}",
+                tcp_conns, last_log
             );
             draw_text_left(
                 hdc,
@@ -6391,8 +6450,17 @@ unsafe extern "system" fn main_wnd_proc(
         WM_TIMER => {
             if wparam == TIMER_FRAME_ID {
                 let updated = app.tick_frame();
-                if updated && !app.minimized_to_tray {
-                    InvalidateRect(hwnd, std::ptr::null(), FALSE);
+                if updated && !app.minimized_to_tray && IsIconic(hwnd) == 0 {
+                    if !app.any_modal_open()
+                        && app.open_dropdown.is_none()
+                        && !app.ui_needs_full_repaint
+                        && app.backbuf_w > 100
+                    {
+                        let mon_rc = RECT::new(14, 96, app.backbuf_w - 14, 490);
+                        InvalidateRect(hwnd, &mon_rc, FALSE);
+                    } else {
+                        InvalidateRect(hwnd, std::ptr::null(), FALSE);
+                    }
                 }
             }
             0
@@ -6502,11 +6570,13 @@ unsafe extern "system" fn main_wnd_proc(
                 .iter()
                 .position(|z| z.rect.contains(x, y));
             if old_hit != new_hit || old_dd != new_dd {
+                app.ui_needs_full_repaint = true;
                 InvalidateRect(hwnd, std::ptr::null(), FALSE);
             }
             0
         }
         WM_LBUTTONDOWN => {
+            app.ui_needs_full_repaint = true;
             let x = (lparam & 0xFFFF) as i16 as i32;
             let y = ((lparam >> 16) & 0xFFFF) as i16 as i32;
 

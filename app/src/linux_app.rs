@@ -49,7 +49,7 @@ pub fn run_linux_main() {
         match args[i].as_str() {
             "-h" | "--help" => {
                 println!(
-                    "SmartCam v2.0.0 (100% Pure Rust — PEFL v1.0) — Copyright (c) 2026 Rubens Rainelli"
+                    "SmartCam v2.1.0 (100% Pure Rust — PEFL v1.0) — Copyright (c) 2026 Rubens Rainelli"
                 );
                 println!("Usage: SmartCam [--status] [--frames N] [--headless] [--accept-pefl]");
                 return;
@@ -69,7 +69,7 @@ pub fn run_linux_main() {
     let cameras = enumerate_camera_devices();
 
     println!("============================================================");
-    println!("  SmartCam v2.0.0 (100% Pure Rust Engine & Native Capture)");
+    println!("  SmartCam v2.1.0 (100% Pure Rust Engine & Native Capture)");
     println!("  SIMD Backend : {}", simd_name);
     println!("  Cameras      : {} detected", cameras.len());
 
@@ -127,7 +127,7 @@ pub fn run_linux_main() {
     let mut frames = 0u64;
 
     println!(
-        "[SmartCam v2.0.0] Active Virtual Camera 'SmartCam' ({}x{} @ {} FPS). Press Ctrl+C to stop.",
+        "[SmartCam v2.1.0] Active Virtual Camera 'SmartCam' ({}x{} @ {} FPS). Press Ctrl+C to stop.",
         out_w, out_h, fps
     );
 

@@ -569,6 +569,9 @@ fn run_headless_pipeline(
     );
 
     let mut raw_buf = Vec::new();
+    let mut last_rw = cfg.camera_input.width;
+    let mut last_rh = cfg.camera_input.height;
+    let mut has_real_frame = false;
     let mut frame_count = 0u64;
     let t_start = Instant::now();
     let frame_interval = Duration::from_secs_f64(1.0 / (cfg.camera_input.fps.max(1) as f64));
@@ -585,9 +588,21 @@ fn run_headless_pipeline(
         let (rw, rh) = if let Some((w, h)) =
             plugin_registry.read_active_camera_plugin_frame(&mut raw_buf, cam_w, cam_h)
         {
+            has_real_frame = true;
+            last_rw = w;
+            last_rh = h;
             (w, h)
         } else if let Some((w, h)) = pipeline.read_camera_frame(&mut raw_buf, cam_w, cam_h) {
+            has_real_frame = true;
+            last_rw = w;
+            last_rh = h;
             (w, h)
+        } else if has_real_frame
+            && last_rw > 0
+            && last_rh > 0
+            && raw_buf.len() >= (last_rw as usize) * (last_rh as usize) * 4
+        {
+            (last_rw, last_rh)
         } else {
             generate_synthetic_bgra_frame(&mut raw_buf, cam_w, cam_h, frame_count);
             (cam_w, cam_h)

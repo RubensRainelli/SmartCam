@@ -1,4 +1,4 @@
-# SmartCam v2.0.0 — Technical Architecture & Engineering Guide
+# SmartCam v2.1.0 — Technical Architecture & Engineering Guide
 
 > **Document Scope:** This document provides an in-depth engineering reference for software architects, systems programmers, and contributors working on **SmartCam v2.0.0**. For end-user installation and usage instructions, see [`README.md`](../README.md) (English) or [`README.it.md`](../README.it.md) (Italian).
 
@@ -164,20 +164,20 @@ Code signing certificates are stored locally in the git-ignored `.certs/` direct
 * `.certs/smartcam_publisher.cer` — X.509 DER public certificate (`EKU=1.3.6.1.5.5.7.3.3` Code Signing).
 * `.certs/smartcam_codesign.pfx` — PKCS#12 archive protected by `.certs/password.txt`.
 
-To sign the release binaries and build the Windows installer (`SmartCam-Setup-v2.0.0-x64.exe`) locally:
+To sign the release binaries and build the Windows installer (`SmartCam-Setup-v2.1.0-x64.exe`) locally:
 
 ```powershell
 $pwd = (Get-Content .certs\password.txt -Raw).Trim()
 signtool.exe sign /f .certs\smartcam_codesign.pfx /p $pwd /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 target\release\SmartCam.exe
 signtool.exe sign /f .certs\smartcam_codesign.pfx /p $pwd /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 target\release\smartcam_mf_source.dll
 iscc platforms\windows\installer\smartcam.iss
-signtool.exe sign /f .certs\smartcam_codesign.pfx /p $pwd /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 dist\SmartCam-Setup-v2.0.0-x64.exe
+signtool.exe sign /f .certs\smartcam_codesign.pfx /p $pwd /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 dist\SmartCam-Setup-v2.1.0-x64.exe
 ```
 
 ### Automated Multi-Platform CI/CD Pipeline
 
 The GitHub Actions workflow [`.github/workflows/release.yml`](../.github/workflows/release.yml) runs on every `v*` tag and builds:
-1. **Windows (`windows-latest`)**: Compiles `SmartCam.exe` and `smartcam_mf_source.dll`, signs both with `signtool.exe`, compiles `SmartCam-Setup-v2.0.0-x64.exe` via Inno Setup, signs the installer, and packages `SmartCam-v2.0.0-windows-x64-portable.zip`.
+1. **Windows (`windows-latest`)**: Compiles `SmartCam.exe` and `smartcam_mf_source.dll`, signs both with `signtool.exe`, compiles `SmartCam-Setup-v2.1.0-x64.exe` via Inno Setup, signs the installer, and packages `SmartCam-v2.0.0-windows-x64-portable.zip`.
 2. **Linux (`ubuntu-latest`)**: Compiles `SmartCam` and packages `SmartCam-v2.0.0-linux-x86_64.tar.gz` and `smartcam_2.0.0_amd64.deb`.
 3. **macOS (`macos-latest`)**: Cross-compiles `x86_64-apple-darwin` and `aarch64-apple-darwin`, merges them via `lipo -create` into a Universal `SmartCam.app` bundle, signs with `codesign --force --deep --sign -`, and packages `SmartCam-v2.0.0-macos-universal.dmg`.
 4. **Release Publication**: Computes `SHA256SUMS.txt` across all release assets and publishes them to the GitHub Release page.

@@ -536,83 +536,99 @@ pub fn generate_blurred_bg_scalar(
     let r = radius.clamp(1, 64) as i32;
     let diam = (2 * r + 1) as u32;
 
-    let mut temp = vec![0u8; w * h * 4];
-
-    // Horizontal O(1) sliding window pass
-    for y in 0..h {
-        let src_row = &src[y * s..(y * s + w * 4)];
-        let tmp_row = &mut temp[y * w * 4..(y + 1) * w * 4];
-
-        let mut sum0 = 0u32;
-        let mut sum1 = 0u32;
-        let mut sum2 = 0u32;
-
-        for k in -r..=r {
-            let sx = k.clamp(0, (w as i32) - 1) as usize;
-            sum0 += src_row[sx * 4 + 0] as u32;
-            sum1 += src_row[sx * 4 + 1] as u32;
-            sum2 += src_row[sx * 4 + 2] as u32;
-        }
-
-        for x in 0..w {
-            tmp_row[x * 4 + 0] = (sum0 / diam) as u8;
-            tmp_row[x * 4 + 1] = (sum1 / diam) as u8;
-            tmp_row[x * 4 + 2] = (sum2 / diam) as u8;
-            tmp_row[x * 4 + 3] = 255;
-
-            let left_x = (x as i32 - r).max(0) as usize;
-            let right_x = (x as i32 + r + 1).min((w as i32) - 1) as usize;
-
-            sum0 = sum0
-                .wrapping_add(src_row[right_x * 4 + 0] as u32)
-                .wrapping_sub(src_row[left_x * 4 + 0] as u32);
-            sum1 = sum1
-                .wrapping_add(src_row[right_x * 4 + 1] as u32)
-                .wrapping_sub(src_row[left_x * 4 + 1] as u32);
-            sum2 = sum2
-                .wrapping_add(src_row[right_x * 4 + 2] as u32)
-                .wrapping_sub(src_row[left_x * 4 + 2] as u32);
-        }
+    std::thread_local! {
+        static BLUR_SCRATCH: std::cell::RefCell<(Vec<u8>, Vec<[u32; 3]>)> =
+            const { std::cell::RefCell::new((Vec::new(), Vec::new())) };
     }
 
-    // Vertical O(1) sliding window pass
-    for x in 0..w {
-        let mut sum0 = 0u32;
-        let mut sum1 = 0u32;
-        let mut sum2 = 0u32;
+    BLUR_SCRATCH.with(|cell| {
+        let mut guard = cell.borrow_mut();
+        let (ref mut temp, ref mut col_sums) = *guard;
+        let needed_bytes = w * h * 4;
+        if temp.len() < needed_bytes {
+            temp.resize(needed_bytes, 0);
+        }
+        if col_sums.len() < w {
+            col_sums.resize(w, [0u32; 3]);
+        }
 
+        // Horizontal O(1) sliding window pass
+        for y in 0..h {
+            let src_row = &src[y * s..(y * s + w * 4)];
+            let tmp_row = &mut temp[y * w * 4..(y + 1) * w * 4];
+
+            let mut sum0 = 0u32;
+            let mut sum1 = 0u32;
+            let mut sum2 = 0u32;
+
+            for k in -r..=r {
+                let sx = k.clamp(0, (w as i32) - 1) as usize;
+                sum0 += src_row[sx * 4 + 0] as u32;
+                sum1 += src_row[sx * 4 + 1] as u32;
+                sum2 += src_row[sx * 4 + 2] as u32;
+            }
+
+            for x in 0..w {
+                tmp_row[x * 4 + 0] = (sum0 / diam) as u8;
+                tmp_row[x * 4 + 1] = (sum1 / diam) as u8;
+                tmp_row[x * 4 + 2] = (sum2 / diam) as u8;
+                tmp_row[x * 4 + 3] = 255;
+
+                let left_x = (x as i32 - r).max(0) as usize;
+                let right_x = (x as i32 + r + 1).min((w as i32) - 1) as usize;
+
+                sum0 = sum0
+                    .wrapping_add(src_row[right_x * 4 + 0] as u32)
+                    .wrapping_sub(src_row[left_x * 4 + 0] as u32);
+                sum1 = sum1
+                    .wrapping_add(src_row[right_x * 4 + 1] as u32)
+                    .wrapping_sub(src_row[left_x * 4 + 1] as u32);
+                sum2 = sum2
+                    .wrapping_add(src_row[right_x * 4 + 2] as u32)
+                    .wrapping_sub(src_row[left_x * 4 + 2] as u32);
+            }
+        }
+
+        // Vertical O(1) sliding window pass (row-major for L1 cache locality)
+        col_sums[..w].fill([0u32; 3]);
         for k in -r..=r {
             let sy = k.clamp(0, (h as i32) - 1) as usize;
-            let off = (sy * w + x) * 4;
-            sum0 += temp[off + 0] as u32;
-            sum1 += temp[off + 1] as u32;
-            sum2 += temp[off + 2] as u32;
+            let row = &temp[sy * w * 4..(sy + 1) * w * 4];
+            for x in 0..w {
+                let px = x * 4;
+                col_sums[x][0] += row[px + 0] as u32;
+                col_sums[x][1] += row[px + 1] as u32;
+                col_sums[x][2] += row[px + 2] as u32;
+            }
         }
 
         for y in 0..h {
-            let dst_off = y * s + x * 4;
-            dst[dst_off + 0] = (sum0 / diam) as u8;
-            dst[dst_off + 1] = (sum1 / diam) as u8;
-            dst[dst_off + 2] = (sum2 / diam) as u8;
-            dst[dst_off + 3] = 255;
-
+            let dst_row = &mut dst[y * s..(y * s + w * 4)];
             let top_y = (y as i32 - r).max(0) as usize;
             let bot_y = (y as i32 + r + 1).min((h as i32) - 1) as usize;
+            let top_row = &temp[top_y * w * 4..(top_y + 1) * w * 4];
+            let bot_row = &temp[bot_y * w * 4..(bot_y + 1) * w * 4];
 
-            let top_off = (top_y * w + x) * 4;
-            let bot_off = (bot_y * w + x) * 4;
+            for x in 0..w {
+                let px = x * 4;
+                let sums = &mut col_sums[x];
+                dst_row[px + 0] = (sums[0] / diam) as u8;
+                dst_row[px + 1] = (sums[1] / diam) as u8;
+                dst_row[px + 2] = (sums[2] / diam) as u8;
+                dst_row[px + 3] = 255;
 
-            sum0 = sum0
-                .wrapping_add(temp[bot_off + 0] as u32)
-                .wrapping_sub(temp[top_off + 0] as u32);
-            sum1 = sum1
-                .wrapping_add(temp[bot_off + 1] as u32)
-                .wrapping_sub(temp[top_off + 1] as u32);
-            sum2 = sum2
-                .wrapping_add(temp[bot_off + 2] as u32)
-                .wrapping_sub(temp[top_off + 2] as u32);
+                sums[0] = sums[0]
+                    .wrapping_add(bot_row[px + 0] as u32)
+                    .wrapping_sub(top_row[px + 0] as u32);
+                sums[1] = sums[1]
+                    .wrapping_add(bot_row[px + 1] as u32)
+                    .wrapping_sub(top_row[px + 1] as u32);
+                sums[2] = sums[2]
+                    .wrapping_add(bot_row[px + 2] as u32)
+                    .wrapping_sub(top_row[px + 2] as u32);
+            }
         }
-    }
+    });
 
     true
 }

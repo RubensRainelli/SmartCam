@@ -947,6 +947,7 @@ pub struct SmartCamPipelineInstance {
     pub bg_cropped_mirror_h: bool,
     pub bg_cropped_mirror_v: bool,
     pub bg_loaded_path: String,
+    pub bg_solid_cache_state: Option<(u32, u32, [u8; 3])>,
     pub studio_preset_thumbs: Vec<StudioPresetThumb>,
 }
 
@@ -968,16 +969,7 @@ impl SmartCamPipelineInstance {
             _ => SimdTier::Auto,
         };
         let engine = SmartCamEngine::new(tier);
-
-        let engine_handle = unsafe {
-            pure_engine_create(match tier {
-                SimdTier::Scalar => 1,
-                SimdTier::Avx2 => 2,
-                SimdTier::Avx512 => 3,
-                SimdTier::Neon => 4,
-                SimdTier::Auto => 0,
-            })
-        };
+        let engine_handle = std::ptr::null_mut();
 
         let simd_backend_label =
             format!("Pure Rust Runtime SIMD ({})", engine.get_active_simd_name());
@@ -1056,6 +1048,7 @@ impl SmartCamPipelineInstance {
             bg_cropped_mirror_h: cfg.compositor.background_mirror_h,
             bg_cropped_mirror_v: cfg.compositor.background_mirror_v,
             bg_loaded_path: String::new(),
+            bg_solid_cache_state: None,
             studio_preset_thumbs,
         };
         inst.update_greenscreen_config(cfg);
@@ -1273,8 +1266,12 @@ impl SmartCamPipelineInstance {
                 }
             }
         }
-        self.fallback_shm =
-            FallbackSharedMemoryWriter::open(&cfg.virtual_camera.shared_memory_name);
+        if self.sink_handle.is_null() {
+            self.fallback_shm =
+                FallbackSharedMemoryWriter::open(&cfg.virtual_camera.shared_memory_name);
+        } else {
+            self.fallback_shm = None;
+        }
     }
 
     pub fn open_hardware_camera(&mut self, index: u32, width: u32, height: u32, fps: u32) -> bool {
@@ -1552,6 +1549,7 @@ impl SmartCamPipelineInstance {
         }
         if self.bg_buf.len() != total_bytes {
             self.bg_buf.resize(total_bytes, 255);
+            self.bg_solid_cache_state = None;
         }
         if self.mask_buf.len() != total_px {
             self.mask_buf.resize(total_px, 255);
@@ -1587,7 +1585,8 @@ impl SmartCamPipelineInstance {
             return (out_w, out_h);
         }
 
-        // 2. Prepare Background Buffer
+        // 2. Prepare Background Buffer (zero-copy for cached "image" and cached "solid_color")
+        let mut use_cropped_cache_directly = false;
         if cfg.compositor.background_mode == "image" {
             let want_path = if cfg.compositor.background_image_path.is_empty() {
                 "assets/backgrounds/preset_1_studio_blue.jpg"
@@ -1614,7 +1613,7 @@ impl SmartCamPipelineInstance {
                 self.rebuild_cropped_background(out_w, out_h, z, px, py, mh, mv);
             }
             if self.bg_cropped_cache.len() == total_bytes {
-                self.bg_buf.copy_from_slice(&self.bg_cropped_cache);
+                use_cropped_cache_directly = true;
             }
         } else if cfg.compositor.background_mode == "blur" {
             let blur_r = cfg.compositor.background_blur_radius.clamp(2, 40);
@@ -1626,10 +1625,23 @@ impl SmartCamPipelineInstance {
                 out_w * 4,
                 blur_r,
             );
+            self.bg_solid_cache_state = None;
         } else {
             let [r, g, b] = cfg.compositor.background_color_rgb;
-            self.engine
-                .fill_solid_bg(&mut self.bg_buf, out_w, out_h, out_w * 4, r, g, b, true);
+            let target_solid = (out_w, out_h, [r, g, b]);
+            if self.bg_solid_cache_state != Some(target_solid) {
+                self.engine.fill_solid_bg(
+                    &mut self.bg_buf,
+                    out_w,
+                    out_h,
+                    out_w * 4,
+                    r,
+                    g,
+                    b,
+                    true,
+                );
+                self.bg_solid_cache_state = Some(target_solid);
+            }
         }
 
         // 3. Compute Foreground Alpha Mask
@@ -1672,9 +1684,14 @@ impl SmartCamPipelineInstance {
         }
 
         // 4. Pure Rust Runtime SIMD Alpha Blending
+        let bg_slice = if use_cropped_cache_directly {
+            &self.bg_cropped_cache
+        } else {
+            &self.bg_buf
+        };
         self.engine.blend_bgra(
             &self.framed_buf,
-            &self.bg_buf,
+            bg_slice,
             &self.mask_buf,
             &mut self.out_buf,
             out_w,

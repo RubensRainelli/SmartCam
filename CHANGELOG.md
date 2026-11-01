@@ -2,6 +2,25 @@
 
 All notable changes to **SmartCam** are documented in this file.
 
+## [2.1.0] — 2026-11-01
+
+### ⚡ Feature & Performance Release: Desktop Zero-Copy Pipeline, Mobile Native Lens Detection & Power Optimization
+
+* **Smartphone OLED Studio — Native Lens Detection & Desktop-Style Aspect Ratio / Resolution Selectors (`app/src/plugins.rs`)**:
+  * **Automatic Hardware Lens Probing**: Queries `MediaStreamTrack.getCapabilities()` and `getSettings()` on the smartphone browser to detect each physical camera lens's native resolution (`lensMaxW × lensMaxH`), native aspect ratio, and maximum hardware frame rate.
+  * **Coordinated Aspect Ratio & Bandwidth-Scaled Resolution Presets**: Replaced the legacy single percentage scale dropdown with two coordinated selectors matching the Desktop App:
+    * **`📺 Formato (Aspect Ratio)`**: `📱 Nativo Obiettivo` (dynamically displaying the lens's real sensor ratio), `16:9 (Widescreen)`, `4:3 (Standard)`, `1:1 (Quadrato)`, and `9:16 (Verticale)` with automatic distortion-free center-cropping (`computeCenterCropRect`).
+    * **`📐 Risoluzione & Banda`**: `📱 Nativa Obiettivo`, `1080p Full HD`, `900p HD+`, `720p HD — Consigliato`, `540p qHD — Risparmio Banda`, `480p SD — Bassa Banda`, `360p Low — Consumo Minimo`, and `240p Ultra-Low — Rete Lenta`, dynamically computing exact `(W×H)` dimensions for the chosen aspect ratio and applying hardware ISP capture constraints (`track.applyConstraints`) to save mobile battery and Wi-Fi bandwidth.
+  * **Removed Redundant Frame Counter**: Removed the frame counter (`sentFrames` / `frame ricevuti`) from the mobile web UI, test signal canvas, HTTP `/frame` JSON responses, and desktop plugin telemetry bar.
+  * **Mobile GPU & Battery Optimization**: Enabled hardware-accelerated GPU canvas rendering (`{ alpha: false, desynchronized: true }`), native camera sensor synchronization via `video.requestVideoFrameCallback`, adaptive JPEG quality (`0.80` / `0.75` / `0.70`), and zero-allocation BGRA buffer swapping (`decode_image_bytes_gdiplus_into` + `std::mem::swap`) in the Rust HTTP receiver.
+* **Desktop Video Engine & Win32 GUI Performance / Power Optimization (`smartcam-engine`, `smartcam-capture`, `smartcam-mf-source`, `app`)**:
+  * **Eliminated ~18.6–24.8 MB/frame of Redundant Allocations & Copies (>550 MB/s saved at 30 FPS)**: Replaced per-frame heap allocations in `generate_blurred_bg_scalar` with reusable `thread_local!` scratch buffers, implemented zero-copy background blending in `"image"` mode, added solid-color background caching, and added direct `read_frame_into_raw` Media Foundation capture.
+  * **Row-Major Cache-Friendly Kernels & Hoisted Math**: Converted vertical passes in Bokeh box blur (`compositor.rs`) and Green Screen morphological/blur filters (`green_screen.rs`) from column-major to row-major for L1 cache locality and SIMD auto-vectorization; hoisted invariant reciprocals out of `ai_segmenter.rs` and `crop_scaler.rs` inner loops.
+  * **Win32 GDI Partial Repaint & Minimized Sleep**: Cached the Smartphone QR Code matrix (`cached_qr_matrix`), suspended GDI repaints when minimized (`IsIconic`), and restricted 30 FPS timer invalidation to the video monitor rectangle (`monitor_rc`).
+  * **Media Foundation Virtual Camera NV12 Cache & Seqlock Hardening (`smartcam-mf-source`)**: Added NV12 frame caching (`nv12_cache_buf`), 64-attempt hybrid seqlock backoff, and last-good-frame hold to eliminate any standby flash or banding under heavy load.
+
+---
+
 ## [2.0.0] — 2026-10-28
 
 ### 🚀 Major Architectural Milestone: 100% Pure Rust & Exclusive Media Foundation

@@ -51,13 +51,15 @@ If editing package configuration files, do not use standard OSI identifiers (lik
 
 Every AI Assistant working on this repository **MUST** strictly follow these rules before and during any release publication:
 
-### 1. Pre-Release Testing of Modified Components
-- **Before publishing any release**, the functionality of all modified parts/components **MUST be tested and verified** (e.g., unit tests, compilation checks, integration/runtime verification of affected modules).
+### 1. Pre-Release Testing & Manual Verification Gate
+- **Before publishing any release**, the functionality of all modified parts/components **MUST be tested and verified** (e.g., unit tests via `cargo test --workspace`, `cargo build --release`, and integration/runtime verification of affected modules).
 - Never publish or tag a release with untested changes.
+- Keep `app/target/release/SmartCam.exe` and `bin/smartcam_mf_source.dll` synchronized with `target/release/` after local builds so `start_smartcam.ps1` always launches the newest binary.
+- When coordinating multiple subagents, assign disjoint file sets to each subagent and run `cargo test` / `cargo build` centrally after subagents complete to avoid `target/` lock contention.
 
-### 2. Semantic Versioning Standard (`v. A.B.C`)
-Upon publishing a release, the project version must be incremented across the codebase (`Cargo.toml`, installers/packages, `CHANGELOG.md`, etc.) according to the `v. A.B.C` format:
+### 2. Semantic Versioning Standard (`v. A.B.C`) & Release Synchronisation
+Upon publishing a release, the project version must be incremented across the codebase (`Cargo.toml`, `app/smartcam.rc`, `app/build.rs`, `app/src/plugins.rs`, `app/src/linux_app.rs`, `platforms/windows/installer/smartcam.iss`, `.github/workflows/release.yml`, `CHANGELOG.md`, `README.md`, `README.it.md`, `docs/index.html`, `docs/ARCHITECTURE.md`, and the `RubensRainelli.SmartCam` WinGet manifest) according to the `v. A.B.C` format:
 - **`A` (Major / Main Release)**: Increment only when explicitly requested for substantial architectural or project-wide changes (e.g., moving from `v1.0.0` to `v2.0.0` due to the migration from C++ to Rust). Reset `B` and `C` to `0`.
-- **`B` (Minor / Feature Release)**: Increment for intermediate versions that introduce new features not previously present. Reset `C` to `0`.
+- **`B` (Minor / Feature Release)**: Increment for intermediate versions that introduce new features or major performance/UX enhancements (e.g., `v2.1.0`). Reset `C` to `0`.
 - **`C` (Patch / Bugfix Release)**: Increment for bugfixes, stability fixes, and minor patches that do not add new features.
 

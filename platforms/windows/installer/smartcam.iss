@@ -2,11 +2,11 @@
 ; Version 1.0 - 2026-05-26
 ; Copyright (c) 2026 Rubens Rainelli
 ;
-; SmartCam v2.0.0 — Official Windows x64 Installer (Inno Setup 6)
+; SmartCam v2.1.0 — Official Windows x64 Installer (Inno Setup 6)
 ; Pure Rust + Windows Media Foundation Virtual Camera Architecture
 
 #define MyAppName "SmartCam"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.1.0"
 #define MyAppPublisher "Rubens Rainelli"
 #define MyAppURL "https://github.com/RubensRainelli/SmartCam"
 #define MyAppExeName "SmartCam.exe"
@@ -28,7 +28,7 @@ DisableProgramGroupPage=yes
 LicenseFile=LICENSE
 SourceDir=..\..\..
 OutputDir=dist
-OutputBaseFilename=SmartCam-Setup-v2.0.0-x64
+OutputBaseFilename=SmartCam-Setup-v2.1.0-x64
 SetupIconFile=assets\icons\smartcam.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}

@@ -268,4 +268,108 @@ mod tests {
             CoUninitialize();
         }
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_no_green_banding_or_standby_flash_on_seqlock_contention() {
+        use std::sync::atomic::Ordering;
+        use windows::Win32::Media::MediaFoundation::IMFSample;
+
+        let mut buf = vec![0u8; 240 * 8 * 4];
+        SmartCamMfMediaStream::render_standby_pattern(buf.as_mut_ptr(), 240, 8, 5);
+        for px in buf.chunks_exact(4) {
+            assert_eq!(
+                px,
+                &[38, 24, 18, 255],
+                "Standby pattern must be uniform dark slate without vertical cyan/green bars"
+            );
+        }
+
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            let _ = MFStartup(MF_VERSION, 0);
+
+            let producer = smartcam_capture::SharedFrameIpc::open_default_producer()
+                .expect("open default producer");
+            let width = DEFAULT_STREAM_WIDTH;
+            let height = DEFAULT_STREAM_HEIGHT;
+            let mut live_frame = vec![0u8; (width * height * 4) as usize];
+            for px in live_frame.chunks_exact_mut(4) {
+                px[0] = 77;  // B
+                px[1] = 123; // G
+                px[2] = 201; // R
+                px[3] = 255; // A
+            }
+            assert!(producer.write_frame(&live_frame, width, height, width * 4, 30, 1, 111_222, 1));
+
+            let source = SmartCamMfMediaSource::create_com().expect("create_com");
+            let pres_desc = source.CreatePresentationDescriptor().expect("pres_desc");
+            let start_pos = PROPVARIANT::default();
+            source
+                .Start(&pres_desc, &GUID::zeroed(), &start_pos)
+                .expect("Start");
+
+            let ev1 = source
+                .GetEvent(MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS(0))
+                .expect("MENewStream");
+            let ev1_val = ev1.GetValue().expect("MENewStream val");
+            let stream_unk: IUnknown = IUnknown::try_from(&ev1_val).expect("stream IUnknown");
+            let stream: IMFMediaStream = stream_unk.cast().expect("IMFMediaStream");
+            let _ = source
+                .GetEvent(MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS(0))
+                .expect("MESourceStarted");
+            let _ = stream
+                .GetEvent(MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS(0))
+                .expect("MEStreamStarted");
+
+            // 1st sample: reads valid live frame
+            assert!(producer.write_frame(&live_frame, width, height, width * 4, 30, 1, 111_222, 1));
+            stream.RequestSample(None).expect("RequestSample 1");
+            let sample_ev1 = stream
+                .GetEvent(MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS(0))
+                .expect("MEMediaSample 1");
+            let sample_val1 = sample_ev1.GetValue().expect("sample val 1");
+            let sample1: IMFSample =
+                IUnknown::try_from(&sample_val1).unwrap().cast().unwrap();
+            let mb1 = sample1.ConvertToContiguousBuffer().unwrap();
+            let mut ptr1 = std::ptr::null_mut();
+            mb1.Lock(&mut ptr1, None, None).unwrap();
+            let first_px: [u8; 4] = std::slice::from_raw_parts(ptr1, 4).try_into().unwrap();
+            let _ = mb1.Unlock();
+
+            // Simulate producer mid-write contention (odd sequence_counter) while FrameServer requests a sample
+            if let Some(hdr) = producer.header() {
+                hdr.sequence_counter.fetch_or(1, Ordering::SeqCst);
+            }
+
+            stream.RequestSample(None).expect("RequestSample 2 during contention");
+            let sample_ev2 = stream
+                .GetEvent(MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS(0))
+                .expect("MEMediaSample 2");
+            let sample_val2 = sample_ev2.GetValue().expect("sample val 2");
+            let sample2: IMFSample =
+                IUnknown::try_from(&sample_val2).unwrap().cast().unwrap();
+            let mb2 = sample2.ConvertToContiguousBuffer().unwrap();
+            let mut ptr2 = std::ptr::null_mut();
+            mb2.Lock(&mut ptr2, None, None).unwrap();
+            let second_px: [u8; 4] = std::slice::from_raw_parts(ptr2, 4).try_into().unwrap();
+            assert_eq!(
+                second_px, first_px,
+                "Stream must hold the last valid live frame during seqlock contention instead of flashing standby!"
+            );
+            let _ = mb2.Unlock();
+
+            if let Some(hdr) = producer.header() {
+                let s = hdr.sequence_counter.load(Ordering::SeqCst);
+                if (s & 1) != 0 {
+                    hdr.sequence_counter.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+
+            let _ = source.Stop();
+            let _ = source.Shutdown();
+            let _ = MFShutdown();
+            CoUninitialize();
+        }
+    }
 }

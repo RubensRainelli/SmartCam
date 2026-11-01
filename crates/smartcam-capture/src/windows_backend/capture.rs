@@ -331,6 +331,89 @@ impl MfCameraCapture {
     pub fn frame_counter(&self) -> u64 {
         self.frame_counter
     }
+
+    /// Zero-intermediate-copy fast path for C API callers providing a pre-allocated destination buffer.
+    pub unsafe fn read_frame_into_raw(
+        &mut self,
+        dst_ptr: *mut u8,
+        dst_cap: usize,
+        scratch: &mut Vec<u8>,
+    ) -> Option<(u32, u32)> {
+        if !self.is_open || dst_ptr.is_null() {
+            return None;
+        }
+        if self.actual_config.bit_depth == 64 {
+            let (w, h) = self.read_frame(scratch)?;
+            let needed = (w as usize) * (h as usize) * 4;
+            if needed <= dst_cap && scratch.len() >= needed {
+                std::ptr::copy_nonoverlapping(scratch.as_ptr(), dst_ptr, needed);
+                return Some((w, h));
+            }
+            return None;
+        }
+
+        let reader = self.reader.as_ref()?;
+        let mut actual_stream_index = 0u32;
+        let mut stream_flags = 0u32;
+        let mut timestamp_100ns = 0i64;
+        let mut sample = None;
+
+        let hr = reader.ReadSample(
+            MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32,
+            0,
+            Some(&mut actual_stream_index),
+            Some(&mut stream_flags),
+            Some(&mut timestamp_100ns),
+            Some(&mut sample),
+        );
+
+        if hr.is_err() || (stream_flags & MF_SOURCE_READERF_ERROR.0 as u32) != 0 {
+            return None;
+        }
+        let sample = sample?;
+        let buffer = sample.ConvertToContiguousBuffer().ok()?;
+
+        let mut raw_ptr = std::ptr::null_mut();
+        let mut cur_len = 0u32;
+        if buffer.Lock(&mut raw_ptr, None, Some(&mut cur_len)).is_err() || raw_ptr.is_null() {
+            return None;
+        }
+
+        let w = self.actual_config.width;
+        let h = self.actual_config.height;
+        let expected_bytes_32 = (w as usize) * (h as usize) * 4;
+        let expected_bytes_l8 = (w as usize) * (h as usize);
+
+        let success = if (cur_len as usize) >= expected_bytes_32 && dst_cap >= expected_bytes_32 {
+            std::ptr::copy_nonoverlapping(raw_ptr, dst_ptr, expected_bytes_32);
+            true
+        } else if (cur_len as usize) >= expected_bytes_l8
+            && expected_bytes_l8 > 0
+            && dst_cap >= expected_bytes_32
+        {
+            let src_slice = std::slice::from_raw_parts(raw_ptr, expected_bytes_l8);
+            let dst_slice = std::slice::from_raw_parts_mut(dst_ptr, expected_bytes_32);
+            for (i, &lum) in src_slice.iter().enumerate() {
+                let base = i * 4;
+                dst_slice[base] = lum;
+                dst_slice[base + 1] = lum;
+                dst_slice[base + 2] = lum;
+                dst_slice[base + 3] = 255;
+            }
+            true
+        } else {
+            false
+        };
+
+        let _ = buffer.Unlock();
+
+        if success {
+            self.frame_counter += 1;
+            Some((w, h))
+        } else {
+            None
+        }
+    }
 }
 
 impl CameraSource for MfCameraCapture {

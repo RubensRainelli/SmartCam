@@ -466,6 +466,7 @@ struct PhoneFrameSharedState {
     bgra: Vec<u8>,
     width: u32,
     height: u32,
+    frame_seq: u64,
     last_received: Option<Instant>,
     source_tag: String,
 }
@@ -476,6 +477,7 @@ impl Default for PhoneFrameSharedState {
             bgra: Vec::new(),
             width: 0,
             height: 0,
+            frame_seq: 0,
             last_received: None,
             source_tag: String::new(),
         }
@@ -600,10 +602,10 @@ impl PhoneCameraServer {
                             });
                         }
                         Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            thread::sleep(Duration::from_millis(8));
+                            thread::sleep(Duration::from_millis(16));
                         }
                         Err(_) => {
-                            thread::sleep(Duration::from_millis(20));
+                            thread::sleep(Duration::from_millis(25));
                         }
                     }
                 }
@@ -787,6 +789,24 @@ fn handle_phone_http_client(
     );
 }
 
+const HTTP_RESP_OPTIONS: &[u8] = b"HTTP/1.1 204 No Content\r\n\
+Access-Control-Allow-Origin: *\r\n\
+Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
+Access-Control-Allow-Headers: Content-Type\r\n\
+Content-Length: 0\r\n\r\n";
+
+const HTTP_RESP_FRAME_OK: &[u8] = b"HTTP/1.1 200 OK\r\n\
+Content-Type: application/json\r\n\
+Access-Control-Allow-Origin: *\r\n\
+Connection: keep-alive\r\n\
+Content-Length: 11\r\n\r\n{\"ok\":true}";
+
+const HTTP_RESP_FRAME_ERR: &[u8] = b"HTTP/1.1 200 OK\r\n\
+Content-Type: application/json\r\n\
+Access-Control-Allow-Origin: *\r\n\
+Connection: keep-alive\r\n\
+Content-Length: 12\r\n\r\n{\"ok\":false}";
+
 #[allow(clippy::too_many_arguments)]
 fn serve_phone_http_stream<S: Read + Write>(
     stream: &mut S,
@@ -799,8 +819,11 @@ fn serve_phone_http_stream<S: Read + Write>(
     shared_frame: &Arc<Mutex<PhoneFrameSharedState>>,
 ) {
     let mut temp = [0u8; 16384];
+    // Pre-allocated BGRA decode buffer swapped with `shared_frame.bgra` on each frame (zero heap allocations per frame!)
+    let mut decode_scratch_bgra: Vec<u8> = Vec::new();
+    let mut last_logged_dims: (u32, u32) = (0, 0);
 
-    // Support persistent keep-alive connections so mobile browsers can stream 25-30 FPS over a single socket
+    // Support persistent keep-alive connections so mobile browsers can stream 25-60 FPS over a single socket
     while !stop_flag.load(Ordering::Relaxed) {
         let req_deadline = Instant::now() + Duration::from_millis(5000);
         let header_end = loop {
@@ -817,7 +840,7 @@ fn serve_phone_http_stream<S: Read + Write>(
                     if e.kind() == std::io::ErrorKind::WouldBlock
                         || e.kind() == std::io::ErrorKind::Interrupted =>
                 {
-                    thread::sleep(Duration::from_millis(5));
+                    thread::sleep(Duration::from_millis(4));
                 }
                 Err(_) => return,
             }
@@ -827,25 +850,46 @@ fn serve_phone_http_stream<S: Read + Write>(
             return;
         };
         let body_start = hdr_end_idx + 4;
-        let header_str = String::from_utf8_lossy(&read_buf[..hdr_end_idx]).to_string();
-        let mut lines = header_str.lines();
-        let first_line = lines.next().unwrap_or("");
-        let mut parts = first_line.split_whitespace();
-        let method = parts.next().unwrap_or("GET").to_ascii_uppercase();
-        let path = parts.next().unwrap_or("/");
 
+        // Parse HTTP request line and headers without per-frame String allocations
+        let mut method_is_post = false;
+        let mut method_is_options = false;
+        let mut method_is_get = true;
+        let mut req_path_range: (usize, usize) = (0, 0);
         let mut content_length: usize = 0;
         let mut keep_alive = true;
-        for line in lines {
-            if let Some((k, v)) = line.split_once(':') {
-                let key_low = k.trim().to_ascii_lowercase();
-                let val_trim = v.trim();
-                if key_low == "content-length" {
-                    content_length = val_trim.parse::<usize>().unwrap_or(0);
-                } else if key_low == "connection" && val_trim.eq_ignore_ascii_case("close") {
-                    keep_alive = false;
+
+        if let Ok(header_str) = std::str::from_utf8(&read_buf[..hdr_end_idx]) {
+            let mut lines = header_str.lines();
+            if let Some(first_line) = lines.next() {
+                let mut parts = first_line.split_whitespace();
+                let m = parts.next().unwrap_or("GET");
+                method_is_post = m.eq_ignore_ascii_case("POST");
+                method_is_options = m.eq_ignore_ascii_case("OPTIONS");
+                method_is_get = m.eq_ignore_ascii_case("GET");
+                if let Some(p) = parts.next() {
+                    let base_ptr = header_str.as_ptr() as usize;
+                    let p_ptr = p.as_ptr() as usize;
+                    if p_ptr >= base_ptr && p_ptr + p.len() <= base_ptr + hdr_end_idx {
+                        req_path_range = (p_ptr - base_ptr, p_ptr - base_ptr + p.len());
+                    }
                 }
             }
+            for line in lines {
+                if let Some((k, v)) = line.split_once(':') {
+                    let k_trim = k.trim();
+                    let val_trim = v.trim();
+                    if k_trim.eq_ignore_ascii_case("content-length") {
+                        content_length = val_trim.parse::<usize>().unwrap_or(0);
+                    } else if k_trim.eq_ignore_ascii_case("connection")
+                        && val_trim.eq_ignore_ascii_case("close")
+                    {
+                        keep_alive = false;
+                    }
+                }
+            }
+        } else {
+            return;
         }
 
         if content_length > 16 * 1024 * 1024 {
@@ -865,93 +909,95 @@ fn serve_phone_http_stream<S: Read + Write>(
                     if e.kind() == std::io::ErrorKind::WouldBlock
                         || e.kind() == std::io::ErrorKind::Interrupted =>
                 {
-                    thread::sleep(Duration::from_millis(5));
+                    thread::sleep(Duration::from_millis(4));
                 }
                 Err(_) => return,
             }
         }
 
+        let path_str = std::str::from_utf8(&read_buf[req_path_range.0..req_path_range.1])
+            .unwrap_or("/");
         let body = &read_buf[body_start..total_needed];
 
-        if method == "OPTIONS" {
-            let resp = "HTTP/1.1 204 No Content\r\n\
-                        Access-Control-Allow-Origin: *\r\n\
-                        Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
-                        Access-Control-Allow-Headers: Content-Type\r\n\
-                        Content-Length: 0\r\n\r\n";
-            if stream.write_all(resp.as_bytes()).is_err() {
+        if method_is_options {
+            if stream.write_all(HTTP_RESP_OPTIONS).is_err() {
                 return;
             }
-        } else if method == "POST" && path.starts_with("/frame") {
-            let (q_w, q_h, q_fmt) = parse_frame_query(path);
-            let mut decoded_ok = false;
+        } else if method_is_post && path_str.starts_with("/frame") {
+            let (q_w, q_h, q_fmt) = parse_frame_query_ref(path_str);
+            let mut decoded_dims: Option<(u32, u32)> = None;
 
-            if (q_fmt == "rgba" || q_fmt == "bgra" || q_fmt == "raw")
+            if (q_fmt.eq_ignore_ascii_case("rgba")
+                || q_fmt.eq_ignore_ascii_case("bgra")
+                || q_fmt.eq_ignore_ascii_case("raw"))
                 && q_w >= 16
                 && q_h >= 16
                 && q_w <= 4096
                 && q_h <= 4096
                 && body.len() == (q_w as usize) * (q_h as usize) * 4
             {
+                let needed = body.len();
+                if decode_scratch_bgra.len() != needed {
+                    decode_scratch_bgra.resize(needed, 255);
+                }
+                decode_scratch_bgra.copy_from_slice(body);
+                if !q_fmt.eq_ignore_ascii_case("bgra") {
+                    // Convert HTML5 Canvas ImageData RGBA -> SmartCam BGRA32 in-place
+                    for px in decode_scratch_bgra.chunks_exact_mut(4) {
+                        px.swap(0, 2);
+                        px[3] = 255;
+                    }
+                }
                 if let Ok(mut guard) = shared_frame.lock() {
-                    let needed = body.len();
-                    if guard.bgra.len() != needed {
-                        guard.bgra.resize(needed, 255);
-                    }
-                    guard.bgra.copy_from_slice(body);
-                    if q_fmt != "bgra" {
-                        // Convert HTML5 Canvas ImageData RGBA -> SmartCam BGRA32 in-place
-                        for px in guard.bgra.chunks_exact_mut(4) {
-                            px.swap(0, 2);
-                            px[3] = 255;
-                        }
-                    }
+                    std::mem::swap(&mut guard.bgra, &mut decode_scratch_bgra);
                     guard.width = q_w;
                     guard.height = q_h;
+                    guard.frame_seq = guard.frame_seq.wrapping_add(1);
                     guard.last_received = Some(Instant::now());
-                    guard.source_tag = format!("Smartphone Live ({})", peer_addr.ip());
+                    if guard.source_tag.is_empty() {
+                        guard.source_tag = format!("Smartphone Live ({})", peer_addr.ip());
+                    }
                 }
                 received_frames.fetch_add(1, Ordering::Relaxed);
-                decoded_ok = true;
+                decoded_dims = Some((q_w, q_h));
             } else if !body.is_empty() {
-                if let Some((bgra, w, h)) = decode_image_bytes_gdiplus(body) {
+                if let Some((w, h)) = decode_image_bytes_gdiplus_into(body, &mut decode_scratch_bgra)
+                {
                     if let Ok(mut guard) = shared_frame.lock() {
-                        guard.bgra = bgra;
+                        std::mem::swap(&mut guard.bgra, &mut decode_scratch_bgra);
                         guard.width = w;
                         guard.height = h;
+                        guard.frame_seq = guard.frame_seq.wrapping_add(1);
                         guard.last_received = Some(Instant::now());
-                        guard.source_tag = format!("Smartphone HD ({})", peer_addr.ip());
+                        if guard.source_tag.is_empty() {
+                            guard.source_tag = format!("Smartphone HD ({})", peer_addr.ip());
+                        }
                     }
                     received_frames.fetch_add(1, Ordering::Relaxed);
-                    decoded_ok = true;
+                    decoded_dims = Some((w, h));
                 }
             }
 
-            let count = received_frames.load(Ordering::Relaxed);
-            if decoded_ok {
-                if let Ok(mut lg) = last_client_log.lock() {
-                    *lg = format!("🟢 Streaming da {} ({} frame)", peer_addr.ip(), count);
+            if let Some((w, h)) = decoded_dims {
+                if last_logged_dims != (w, h) {
+                    last_logged_dims = (w, h);
+                    if let Ok(mut lg) = last_client_log.lock() {
+                        *lg = format!(
+                            "🟢 Streaming Live da {} ({}×{})",
+                            peer_addr.ip(),
+                            w,
+                            h
+                        );
+                    }
                 }
-            }
-            let json_body = format!("{{\"ok\":{},\"frames\":{}}}", decoded_ok, count);
-            let resp = format!(
-                "HTTP/1.1 200 OK\r\n\
-                 Content-Type: application/json\r\n\
-                 Access-Control-Allow-Origin: *\r\n\
-                 Connection: keep-alive\r\n\
-                 Content-Length: {}\r\n\r\n{}",
-                json_body.len(),
-                json_body
-            );
-            if stream.write_all(resp.as_bytes()).is_err() {
+                if stream.write_all(HTTP_RESP_FRAME_OK).is_err() {
+                    return;
+                }
+            } else if stream.write_all(HTTP_RESP_FRAME_ERR).is_err() {
                 return;
             }
-        } else if method == "GET" && path.starts_with("/status") {
-            let count = received_frames.load(Ordering::Relaxed);
-            let json_body = format!(
-                "{{\"ok\":true,\"port\":{},\"frames\":{}}}",
-                server_port, count
-            );
+        } else if method_is_get && path_str.starts_with("/status") {
+            let json_body = format!("{{\"ok\":true,\"port\":{}}}", server_port);
             let resp = format!(
                 "HTTP/1.1 200 OK\r\n\
                  Content-Type: application/json\r\n\
@@ -966,7 +1012,7 @@ fn serve_phone_http_stream<S: Read + Write>(
             }
         } else {
             if let Ok(mut lg) = last_client_log.lock() {
-                *lg = format!("✅ Pagina aperta da {} (HTTP {})", peer_addr.ip(), path);
+                *lg = format!("✅ Pagina aperta da {} (HTTP {})", peer_addr.ip(), path_str);
             }
             let lan_ip = detect_local_lan_ip();
             let html = build_smartphone_transmitter_html(&lan_ip, server_port);
@@ -995,17 +1041,17 @@ fn serve_phone_http_stream<S: Read + Write>(
     }
 }
 
-fn parse_frame_query(path: &str) -> (u32, u32, String) {
+fn parse_frame_query_ref(path: &str) -> (u32, u32, &str) {
     let mut w = 0u32;
     let mut h = 0u32;
-    let mut fmt = "rgba".to_string();
+    let mut fmt = "rgba";
     if let Some((_, query)) = path.split_once('?') {
         for pair in query.split('&') {
             if let Some((k, v)) = pair.split_once('=') {
                 match k.trim() {
                     "w" => w = v.trim().parse::<u32>().unwrap_or(0),
                     "h" => h = v.trim().parse::<u32>().unwrap_or(0),
-                    "fmt" => fmt = v.trim().to_ascii_lowercase(),
+                    "fmt" => fmt = v.trim(),
                     _ => {}
                 }
             }
@@ -1042,8 +1088,9 @@ fn ensure_gdiplus_initialized() -> bool {
     tok != 0
 }
 
-/// Decodes in-memory JPEG, PNG, or BMP bytes into top-down `BGRA32` pixels via native Windows GDI+ `IStream`.
-pub fn decode_image_bytes_gdiplus(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
+/// Decodes in-memory JPEG, PNG, or BMP bytes directly into a reusable `out_bgra` buffer (`BGRA32` pixels)
+/// via native Windows GDI+ `IStream`, avoiding heap allocations when frame dimensions match.
+pub fn decode_image_bytes_gdiplus_into(bytes: &[u8], out_bgra: &mut Vec<u8>) -> Option<(u32, u32)> {
     if bytes.len() < 16 || !ensure_gdiplus_initialized() {
         return None;
     }
@@ -1107,7 +1154,10 @@ pub fn decode_image_bytes_gdiplus(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
         }
 
         let row_bytes = (width * 4) as usize;
-        let mut out = vec![255u8; row_bytes * (height as usize)];
+        let total_bytes = row_bytes * (height as usize);
+        if out_bgra.len() != total_bytes {
+            out_bgra.resize(total_bytes, 255);
+        }
         for y in 0..(height as usize) {
             let src_row = if bdata.Stride >= 0 {
                 bdata.Scan0.add(y * (bdata.Stride as usize))
@@ -1115,7 +1165,7 @@ pub fn decode_image_bytes_gdiplus(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
                 let abs_stride = (-bdata.Stride) as usize;
                 bdata.Scan0.sub(((height as usize) - 1 - y) * abs_stride)
             };
-            let dst_row = &mut out[y * row_bytes..(y + 1) * row_bytes];
+            let dst_row = &mut out_bgra[y * row_bytes..(y + 1) * row_bytes];
             std::ptr::copy_nonoverlapping(src_row, dst_row.as_mut_ptr(), row_bytes);
             for px in dst_row.chunks_exact_mut(4) {
                 px[3] = 255;
@@ -1125,8 +1175,15 @@ pub fn decode_image_bytes_gdiplus(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
         let _ = GdipBitmapUnlockBits(bmp, &mut bdata);
         let _ = GdipDisposeImage(bmp);
         release_com_interface(stream);
-        Some((out, width, height))
+        Some((width, height))
     }
+}
+
+/// Decodes in-memory JPEG, PNG, or BMP bytes into top-down `BGRA32` pixels via native Windows GDI+ `IStream`.
+pub fn decode_image_bytes_gdiplus(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
+    let mut out = Vec::new();
+    let (w, h) = decode_image_bytes_gdiplus_into(bytes, &mut out)?;
+    Some((out, w, h))
 }
 
 unsafe fn release_com_interface(unk: *mut c_void) {
@@ -1152,12 +1209,8 @@ fn run_external_phone_pull_worker(
     local_server_port: u16,
 ) {
     let local_ip = detect_local_lan_ip();
+    let mut pull_scratch_bgra: Vec<u8> = Vec::new();
     while !stop_flag.load(Ordering::Relaxed) {
-        let target_url = remote_pull_url
-            .lock()
-            .map(|g| g.trim().to_string())
-            .unwrap_or_default();
-
         // Skip pulling if we recently received pushed frames from the mobile web page
         let push_active = shared_frame
             .lock()
@@ -1166,8 +1219,18 @@ fn run_external_phone_pull_worker(
             .map(|t| t.elapsed() < Duration::from_secs(3))
             .unwrap_or(false);
 
-        if push_active || target_url.is_empty() {
-            thread::sleep(Duration::from_millis(400));
+        if push_active {
+            thread::sleep(Duration::from_millis(500));
+            continue;
+        }
+
+        let target_url = remote_pull_url
+            .lock()
+            .map(|g| g.trim().to_string())
+            .unwrap_or_default();
+
+        if target_url.is_empty() {
+            thread::sleep(Duration::from_millis(500));
             continue;
         }
 
@@ -1180,22 +1243,30 @@ fn run_external_phone_pull_worker(
 
             if !is_self && !is_default_placeholder {
                 // Try snapshot endpoint first (or the exact user path)
-                let candidate_paths = if path == "/video" || path == "/" {
-                    vec!["/shot.jpg".to_string(), path.clone()]
+                let candidate_paths: [&str; 2] = if path == "/video" || path == "/" {
+                    ["/shot.jpg", path.as_str()]
                 } else {
-                    vec![path.clone()]
+                    [path.as_str(), ""]
                 };
 
                 let mut pulled = false;
                 for p in candidate_paths {
-                    if let Some(jpeg_bytes) = fetch_http_jpeg_frame(&host, port, &p) {
-                        if let Some((bgra, w, h)) = decode_image_bytes_gdiplus(&jpeg_bytes) {
+                    if p.is_empty() {
+                        continue;
+                    }
+                    if let Some(jpeg_bytes) = fetch_http_jpeg_frame(&host, port, p) {
+                        if let Some((w, h)) =
+                            decode_image_bytes_gdiplus_into(&jpeg_bytes, &mut pull_scratch_bgra)
+                        {
                             if let Ok(mut guard) = shared_frame.lock() {
-                                guard.bgra = bgra;
+                                std::mem::swap(&mut guard.bgra, &mut pull_scratch_bgra);
                                 guard.width = w;
                                 guard.height = h;
+                                guard.frame_seq = guard.frame_seq.wrapping_add(1);
                                 guard.last_received = Some(Instant::now());
-                                guard.source_tag = format!("Pull {}:{}", host, port);
+                                if guard.source_tag.is_empty() {
+                                    guard.source_tag = format!("Pull {}:{}", host, port);
+                                }
                             }
                             received_frames.fetch_add(1, Ordering::Relaxed);
                             pulled = true;
@@ -1211,7 +1282,7 @@ fn run_external_phone_pull_worker(
             }
         }
 
-        thread::sleep(Duration::from_millis(750));
+        thread::sleep(Duration::from_millis(600));
     }
 }
 
@@ -1445,10 +1516,10 @@ fn run_local_tls_loopback_terminator(
                 });
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(8));
+                thread::sleep(Duration::from_millis(16));
             }
             Err(_) => {
-                thread::sleep(Duration::from_millis(20));
+                thread::sleep(Duration::from_millis(25));
             }
         }
     }
@@ -1574,7 +1645,9 @@ fn build_smartphone_transmitter_html(lan_ip: &str, port: u16) -> String {
     margin-bottom: 8px;
     display: flex;
     justify-content: space-between;
+    gap: 6px;
     padding: 0 4px;
+    flex-wrap: wrap;
   }}
   .grid-2 {{
     display: grid;
@@ -1692,10 +1765,10 @@ fn build_smartphone_transmitter_html(lan_ip: &str, port: u16) -> String {
 
   <div class="telemetry-bar">
     <span id="sensorInfoTxt">Sensore: —</span>
-    <span id="txInfoTxt">Invio PC: —</span>
+    <span id="txInfoTxt">Output PC: —</span>
   </div>
 
-  <!-- Dropdown Controls: Camera Device, Scale/Bandwidth, FPS, Rotation -->
+  <!-- Dropdown Controls: Camera Lens, Aspect Ratio (Desktop-style), Resolution & Bandwidth Preset, FPS, Rotation, Mirror -->
   <div class="grid-2">
     <div class="field-group full">
       <label class="fld-lbl" for="cameraDeviceSel">📷 Fotocamera / Obiettivo del Telefono:</label>
@@ -1706,13 +1779,27 @@ fn build_smartphone_transmitter_html(lan_ip: &str, port: u16) -> String {
     </div>
 
     <div class="field-group">
-      <label class="fld-lbl" for="scaleSel">📐 Risoluzione & Banda:</label>
-      <select id="scaleSel" onchange="updateStreamDimensions()">
-        <option value="1.00">100% (Nativa Sensore)</option>
-        <option value="0.75">75% (Alta Qualità)</option>
-        <option value="0.55" selected>55% (Fluido / Risparmio Banda)</option>
-        <option value="0.38">38% (Bassa Banda)</option>
-        <option value="0.25">25% (Minimo Consumo)</option>
+      <label class="fld-lbl" for="aspectSel">📺 Formato (Aspect Ratio):</label>
+      <select id="aspectSel" onchange="onFormatOrResolutionChange()">
+        <option value="native" selected>📱 Nativo Obiettivo (Sensore)</option>
+        <option value="16:9">16:9 (Widescreen)</option>
+        <option value="4:3">4:3 (Standard)</option>
+        <option value="1:1">1:1 (Quadrato)</option>
+        <option value="9:16">9:16 (Verticale)</option>
+      </select>
+    </div>
+
+    <div class="field-group">
+      <label class="fld-lbl" for="resSel">📐 Risoluzione & Banda:</label>
+      <select id="resSel" onchange="onFormatOrResolutionChange()">
+        <option value="native">📱 Nativa Obiettivo (Max)</option>
+        <option value="1080p">1080p Full HD (1920×1080)</option>
+        <option value="900p">900p HD+ (1600×900)</option>
+        <option value="720p" selected>720p HD (1280×720) — Consigliato</option>
+        <option value="540p">540p qHD (960×540) — Risparmio Banda</option>
+        <option value="480p">480p SD (854×480) — Bassa Banda</option>
+        <option value="360p">360p Low (640×360) — Consumo Minimo</option>
+        <option value="240p">240p Ultra-Low (426×240)</option>
       </select>
     </div>
 
@@ -1721,10 +1808,10 @@ fn build_smartphone_transmitter_html(lan_ip: &str, port: u16) -> String {
       <select id="fpsSel" onchange="onFpsChange()">
         <option value="60">60 FPS (Ultra Fluido)</option>
         <option value="30" selected>30 FPS (Standard)</option>
+        <option value="25">25 FPS (PAL)</option>
         <option value="24">24 FPS (Cinema)</option>
         <option value="15">15 FPS (Risparmio Batteria)</option>
         <option value="10">10 FPS (Bassa Banda)</option>
-        <option value="5">5 FPS (Minimo)</option>
       </select>
     </div>
 
@@ -1739,7 +1826,7 @@ fn build_smartphone_transmitter_html(lan_ip: &str, port: u16) -> String {
       </select>
     </div>
 
-    <div class="field-group">
+    <div class="field-group full">
       <label class="fld-lbl" for="mirrorSel">🪞 Specchiatura Video:</label>
       <select id="mirrorSel" onchange="updateStreamDimensions()">
         <option value="0" selected>Normale (Non specchiato)</option>
@@ -1770,11 +1857,14 @@ fn build_smartphone_transmitter_html(lan_ip: &str, port: u16) -> String {
 
 <script>
 const previewCanvas = document.getElementById('previewCanvas');
-const previewCtx = previewCanvas.getContext('2d', {{ alpha: false }});
-// Offscreen capture canvas so we can turn off local preview rendering (`localPreviewEnabled = false`)
-// while continuing to capture & transmit frames to the PC at full speed!
+// GPU-accelerated desynchronized 2D contexts (avoids CPU readback fallback)
+const previewCtx = previewCanvas.getContext('2d', {{ alpha: false, desynchronized: true }});
 const txCanvas = document.createElement('canvas');
-const txCtx = txCanvas.getContext('2d', {{ alpha: false, willReadFrequently: true }});
+const txCtx = txCanvas.getContext('2d', {{ alpha: false, desynchronized: true }});
+if (txCtx) {{
+  txCtx.imageSmoothingEnabled = true;
+  txCtx.imageSmoothingQuality = 'low';
+}}
 
 const video = document.getElementById('camVideo');
 const badge = document.getElementById('statusBadge');
@@ -1782,9 +1872,10 @@ const wakeBadge = document.getElementById('wakeBadge');
 const sensorInfoTxt = document.getElementById('sensorInfoTxt');
 const txInfoTxt = document.getElementById('txInfoTxt');
 const cameraSel = document.getElementById('cameraDeviceSel');
+const aspectSel = document.getElementById('aspectSel');
+const resSel = document.getElementById('resSel');
 
 let streamingMode = 'none';
-let sentFrames = 0;
 let busySending = false;
 let currentStream = null;
 let loadedImage = null;
@@ -1794,18 +1885,30 @@ let blackoutActive = false;
 let wakeLockSentinel = null;
 let noSleepAudioCtx = null;
 let pumpTimerId = null;
+let rvfcHandle = null;
+let lastFrameSentTs = 0;
+let lastBadgeText = '';
 
-// Sensor native dimensions reported by the phone camera
-let sensorNativeW = 640;
-let sensorNativeH = 480;
+// Sensor native dimensions and hardware lens capabilities reported by the phone camera
+let sensorNativeW = 1280;
+let sensorNativeH = 720;
+let lensMaxW = 0;
+let lensMaxH = 0;
+let lensMaxFps = 60;
+
+function setBadgeStatus(text) {{
+  if (lastBadgeText !== text) {{
+    lastBadgeText = text;
+    badge.textContent = text;
+  }}
+}}
 
 // 1. Check Secure Context (HTTPS) for mobile camera permissions
 function checkHttpsRequirement() {{
   const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
   if (!window.isSecureContext && !isLocal && location.protocol === 'http:') {{
     document.getElementById('httpsBanner').style.display = 'block';
-    badge.textContent = '🔒 Tocca il pulsante verde HTTPS qui sotto per sbloccare il permesso fotocamera';
-    // Automatically redirect to HTTPS on the same port if not yet attempted in this session
+    setBadgeStatus('🔒 Tocca il pulsante verde HTTPS qui sotto per sbloccare il permesso fotocamera');
     if (!sessionStorage.getItem('smartcam_https_tried')) {{
       sessionStorage.setItem('smartcam_https_tried', '1');
       setTimeout(() => {{
@@ -1814,7 +1917,6 @@ function checkHttpsRequirement() {{
     }}
   }} else if (window.isSecureContext) {{
     document.getElementById('httpsBanner').style.display = 'none';
-    // Automatically request camera permission & enumerate lenses on load
     setTimeout(() => {{
       startLiveCamera(false);
     }}, 250);
@@ -1837,10 +1939,7 @@ async function enableWakeLockAntiStandby() {{
         wakeBadge.textContent = '☀️ Anti-Standby: Riattivazione...';
       }});
     }}
-  }} catch (e) {{
-    // Fallback below
-  }}
-  // Silent WebAudio keep-awake for mobile browsers without WakeLock API
+  }} catch (e) {{}}
   try {{
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (AudioCtx && !noSleepAudioCtx) {{
@@ -1885,7 +1984,7 @@ async function refreshCameraList(preserveCurrent) {{
       const low = rawLabel.toLowerCase();
       if (low.includes('front') || low.includes('user') || low.includes('anteriore') || low.includes('selfie')) {{
         icon = '🤳';
-      }} else if (low.includes('ultra') || low.includes('wide') || low.includes('0.5')) {{
+      }} else if (low.includes('ultra') || low.includes('wide') || low.includes('0.5') || low.includes('grandangol')) {{
         icon = '📐';
       }} else if (low.includes('tele') || low.includes('zoom')) {{
         icon = '🔭';
@@ -1896,7 +1995,6 @@ async function refreshCameraList(preserveCurrent) {{
       cameraSel.appendChild(opt);
     }});
 
-    // Also keep explicit facingMode fallbacks at the end of the dropdown
     const optEnv = document.createElement('option');
     optEnv.value = 'env_default';
     optEnv.textContent = '📸 Posteriore Automatica (environment)';
@@ -1927,29 +2025,240 @@ function getSelectedFps() {{
   return parseInt(document.getElementById('fpsSel').value, 10) || 30;
 }}
 
-async function onFpsChange() {{
-  const fps = getSelectedFps();
-  if (currentStream) {{
-    const track = currentStream.getVideoTracks()[0];
-    if (track && track.applyConstraints) {{
-      try {{
-        await track.applyConstraints({{ frameRate: {{ ideal: fps, max: fps }} }});
-      }} catch (e) {{}}
+// 4. Detect Real Lens Capabilities (`track.getCapabilities()` & `track.getSettings()`)
+function formatAspectRatioLabel(w, h) {{
+  if (!w || !h) return '4:3';
+  const ratio = w / h;
+  if (Math.abs(ratio - 16 / 9) < 0.06) return '16:9';
+  if (Math.abs(ratio - 9 / 16) < 0.06) return '9:16';
+  if (Math.abs(ratio - 4 / 3) < 0.06) return '4:3';
+  if (Math.abs(ratio - 3 / 4) < 0.06) return '3:4';
+  if (Math.abs(ratio - 1.0) < 0.05) return '1:1';
+  const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
+  const g = gcd(w, h) || 1;
+  const arW = Math.round(w / g);
+  const arH = Math.round(h / g);
+  return (arW <= 32 && arH <= 32) ? (arW + ':' + arH) : (ratio.toFixed(2) + ':1');
+}}
+
+function inspectActiveLensCapabilities() {{
+  lensMaxW = 0;
+  lensMaxH = 0;
+  lensMaxFps = 60;
+  if (!currentStream) return;
+  const track = currentStream.getVideoTracks()[0];
+  if (!track) return;
+
+  try {{
+    const caps = track.getCapabilities ? track.getCapabilities() : {{}};
+    const settings = track.getSettings ? track.getSettings() : {{}};
+    if (caps.width && caps.width.max) lensMaxW = caps.width.max;
+    if (caps.height && caps.height.max) lensMaxH = caps.height.max;
+    if (caps.frameRate && caps.frameRate.max) lensMaxFps = Math.round(caps.frameRate.max);
+    if (!lensMaxW && settings.width) lensMaxW = settings.width;
+    if (!lensMaxH && settings.height) lensMaxH = settings.height;
+  }} catch (e) {{}}
+}}
+
+// Desktop-style resolution calculation for any selected Aspect Ratio (`native`, `16:9`, `4:3`, `1:1`, `9:16`)
+function computeDimensionsForAspectAndPreset(aspectVal, presetCode, effSensorW, effSensorH) {{
+  const sw = Math.max(64, effSensorW || 1280);
+  const sh = Math.max(64, effSensorH || 720);
+
+  if (presetCode === 'native') {{
+    let maxW = sw;
+    let maxH = sh;
+    if (lensMaxW > 0 && lensMaxH > 0) {{
+      const isPortrait = sh > sw;
+      const hwW = isPortrait ? Math.min(lensMaxW, lensMaxH) : Math.max(lensMaxW, lensMaxH);
+      const hwH = isPortrait ? Math.max(lensMaxW, lensMaxH) : Math.min(lensMaxW, lensMaxH);
+      // Cap web canvas transmit size to 1920 on longest edge to avoid mobile RAM/GPU spikes while keeping native ratio
+      const scaleCap = Math.min(1.0, 1920 / Math.max(hwW, hwH, 1));
+      maxW = Math.max(sw, Math.round(hwW * scaleCap) & ~1);
+      maxH = Math.max(sh, Math.round(hwH * scaleCap) & ~1);
     }}
+    if (aspectVal === 'native') {{
+      return [maxW & ~1, maxH & ~1];
+    }}
+    const [arW, arH] = parseAspectPair(aspectVal, maxW, maxH);
+    const crop = computeCenterCropRect(maxW, maxH, arW, arH);
+    return [Math.max(64, crop[2] & ~1), Math.max(64, crop[3] & ~1)];
   }}
+
+  const baseH = parseInt(presetCode, 10) || 720;
+  if (aspectVal === 'native') {{
+    // Scale proportionally preserving the exact native aspect ratio of the phone lens
+    const isPortrait = sh > sw;
+    const refShort = isPortrait ? sw : sh;
+    const scale = baseH / Math.max(1, refShort);
+    const w = Math.max(64, Math.round(sw * scale) & ~1);
+    const h = Math.max(64, Math.round(sh * scale) & ~1);
+    return [w, h];
+  }}
+
+  if (aspectVal === '16:9') {{
+    if (baseH === 1080) return [1920, 1080];
+    if (baseH === 900) return [1600, 900];
+    if (baseH === 720) return [1280, 720];
+    if (baseH === 540) return [960, 540];
+    if (baseH === 480) return [854, 480];
+    if (baseH === 360) return [640, 360];
+    if (baseH === 240) return [426, 240];
+  }} else if (aspectVal === '4:3') {{
+    if (baseH === 1080) return [1440, 1080];
+    if (baseH === 900) return [1200, 900];
+    if (baseH === 720) return [960, 720];
+    if (baseH === 540) return [720, 540];
+    if (baseH === 480) return [640, 480];
+    if (baseH === 360) return [480, 360];
+    if (baseH === 240) return [320, 240];
+  }} else if (aspectVal === '1:1') {{
+    const evenH = baseH & ~1;
+    return [evenH, evenH];
+  }} else if (aspectVal === '9:16') {{
+    if (baseH === 1080) return [608, 1080];
+    if (baseH === 900) return [506, 900];
+    if (baseH === 720) return [404, 720];
+    if (baseH === 540) return [304, 540];
+    if (baseH === 480) return [270, 480];
+    if (baseH === 360) return [202, 360];
+    if (baseH === 240) return [136, 240];
+  }}
+
+  return [1280, 720];
+}}
+
+function parseAspectPair(aspectVal, fallbackW, fallbackH) {{
+  if (aspectVal === '16:9') return [16, 9];
+  if (aspectVal === '4:3') return [4, 3];
+  if (aspectVal === '1:1') return [1, 1];
+  if (aspectVal === '9:16') return [9, 16];
+  return [Math.max(1, fallbackW), Math.max(1, fallbackH)];
+}}
+
+function computeCenterCropRect(srcW, srcH, aspectW, aspectH) {{
+  if (srcW <= 0 || srcH <= 0 || aspectW <= 0 || aspectH <= 0) {{
+    return [0, 0, srcW, srcH];
+  }}
+  const lhs = srcW * aspectH;
+  const rhs = srcH * aspectW;
+  if (lhs > rhs) {{
+    let targetW = Math.floor(rhs / aspectH) & ~1;
+    if (targetW <= 0) targetW = srcW;
+    const x = Math.floor((srcW - targetW) / 2);
+    return [x, 0, targetW, srcH];
+  }} else if (lhs < rhs) {{
+    let targetH = Math.floor(lhs / aspectW) & ~1;
+    if (targetH <= 0) targetH = srcH;
+    const y = Math.floor((srcH - targetH) / 2);
+    return [0, y, srcW, targetH];
+  }}
+  return [0, 0, srcW, srcH];
+}}
+
+function rebuildResolutionDropdownOptions(effSensorW, effSensorH) {{
+  const aspectVal = aspectSel.value || 'native';
+  const curPreset = resSel.value || '720p';
+  const nativeArLabel = formatAspectRatioLabel(effSensorW, effSensorH);
+
+  // Update the "native" option in #aspectSel with the detected lens aspect ratio
+  if (aspectSel.options.length > 0 && aspectSel.options[0].value === 'native') {{
+    aspectSel.options[0].textContent = '📱 Nativo Obiettivo (' + nativeArLabel + ')';
+  }}
+
+  const presets = [
+    {{ code: 'native', name: '📱 Nativa Obiettivo', tag: 'Max Sensore' }},
+    {{ code: '1080p',  name: '1080p Full HD',       tag: 'Qualità Studio' }},
+    {{ code: '900p',   name: '900p HD+',            tag: 'Alta Qualità' }},
+    {{ code: '720p',   name: '720p HD',             tag: 'Consigliato' }},
+    {{ code: '540p',   name: '540p qHD',            tag: 'Risparmio Banda' }},
+    {{ code: '480p',   name: '480p SD',             tag: 'Bassa Banda' }},
+    {{ code: '360p',   name: '360p Low',            tag: 'Consumo Minimo' }},
+    {{ code: '240p',   name: '240p Ultra-Low',      tag: 'Rete Lenta' }}
+  ];
+
+  const hwMaxLongEdge = (lensMaxW > 0 && lensMaxH > 0) ? Math.max(lensMaxW, lensMaxH) : 4096;
+
+  resSel.innerHTML = '';
+  presets.forEach(p => {{
+    const [w, h] = computeDimensionsForAspectAndPreset(aspectVal, p.code, effSensorW, effSensorH);
+    const longEdge = Math.max(w, h);
+    if (p.code !== 'native' && p.code !== '720p' && longEdge > hwMaxLongEdge + 16) {{
+      return;
+    }}
+    const opt = document.createElement('option');
+    opt.value = p.code;
+    opt.textContent = p.name + ' (' + w + '×' + h + ') — ' + p.tag;
+    resSel.appendChild(opt);
+  }});
+
+  if (Array.from(resSel.options).some(o => o.value === curPreset)) {{
+    resSel.value = curPreset;
+  }} else {{
+    resSel.value = '720p';
+  }}
+}}
+
+function getTargetCameraCaptureDimensions() {{
+  const preset = resSel.value || '720p';
+  if (preset === 'native') {{
+    const w = (lensMaxW > 0) ? Math.min(lensMaxW, 1920) : 1920;
+    const h = (lensMaxH > 0) ? Math.min(lensMaxH, 1080) : 1080;
+    return [w, h];
+  }}
+  const baseH = parseInt(preset, 10) || 720;
+  if (baseH >= 1080) return [1920, 1080];
+  if (baseH >= 900)  return [1600, 900];
+  if (baseH >= 720)  return [1280, 720];
+  if (baseH >= 540)  return [960, 540];
+  if (baseH >= 480)  return [640, 480];
+  if (baseH >= 360)  return [640, 360];
+  return [320, 240];
+}}
+
+async function applyOptimalTrackConstraints() {{
+  if (!currentStream) return;
+  const track = currentStream.getVideoTracks()[0];
+  if (!track || !track.applyConstraints) return;
+  const fps = getSelectedFps();
+  const [capW, capH] = getTargetCameraCaptureDimensions();
+  try {{
+    await track.applyConstraints({{
+      width: {{ ideal: capW }},
+      height: {{ ideal: capH }},
+      frameRate: {{ ideal: fps, max: fps }}
+    }});
+  }} catch (e) {{
+    try {{
+      await track.applyConstraints({{ frameRate: {{ ideal: fps }} }});
+    }} catch (e2) {{}}
+  }}
+}}
+
+async function onFormatOrResolutionChange() {{
+  updateStreamDimensions();
+  await applyOptimalTrackConstraints();
+  setTimeout(updateStreamDimensions, 120);
+}}
+
+async function onFpsChange() {{
+  await applyOptimalTrackConstraints();
   updateStreamDimensions();
 }}
 
-// 4. Real Phone Orientation & Native Sensor Aspect-Ratio Scaling
 function getEffectiveRotationDeg() {{
   const sel = document.getElementById('rotSel').value;
   if (sel !== 'auto') {{
     return parseInt(sel, 10) || 0;
   }}
-  // Note: On mobile browsers, `video.videoWidth` and `video.videoHeight` already reflect the physical
-  // portrait/landscape orientation when the browser rotates the video element, OR `screen.orientation.angle`
-  // reports the device rotation when locked. We expose both automatic detection and 0/90/180/270 override.
   return 0;
+}}
+
+function getAdaptiveJpegQuality(outW, outH) {{
+  const pixels = outW * outH;
+  if (pixels >= 1280 * 720) return 0.80;
+  if (pixels >= 640 * 480) return 0.75;
+  return 0.70;
 }}
 
 function updateStreamDimensions() {{
@@ -1957,24 +2266,28 @@ function updateStreamDimensions() {{
     sensorNativeW = video.videoWidth;
     sensorNativeH = video.videoHeight;
   }} else if (streamingMode === 'photo' && loadedImage) {{
-    sensorNativeW = loadedImage.naturalWidth || 640;
-    sensorNativeH = loadedImage.naturalHeight || 480;
+    sensorNativeW = loadedImage.naturalWidth || 1280;
+    sensorNativeH = loadedImage.naturalHeight || 720;
   }}
 
-  const scale = parseFloat(document.getElementById('scaleSel').value) || 0.55;
   const rot = getEffectiveRotationDeg();
   const swapAxes = (rot === 90 || rot === 270);
+  const effSensorW = swapAxes ? sensorNativeH : sensorNativeW;
+  const effSensorH = swapAxes ? sensorNativeW : sensorNativeH;
 
-  const baseW = swapAxes ? sensorNativeH : sensorNativeW;
-  const baseH = swapAxes ? sensorNativeW : sensorNativeH;
+  rebuildResolutionDropdownOptions(effSensorW, effSensorH);
 
-  // Keep dimensions even multiples of 2 while preserving exact sensor aspect ratio
-  const outW = Math.max(64, (Math.round(baseW * scale) & ~1));
-  const outH = Math.max(64, (Math.round(baseH * scale) & ~1));
+  const aspectVal = aspectSel.value || 'native';
+  const presetCode = resSel.value || '720p';
+  const [outW, outH] = computeDimensionsForAspectAndPreset(aspectVal, presetCode, effSensorW, effSensorH);
 
   if (txCanvas.width !== outW || txCanvas.height !== outH) {{
     txCanvas.width = outW;
     txCanvas.height = outH;
+    if (txCtx) {{
+      txCtx.imageSmoothingEnabled = true;
+      txCtx.imageSmoothingQuality = 'low';
+    }}
   }}
   if (previewCanvas.width !== outW || previewCanvas.height !== outH) {{
     previewCanvas.width = outW;
@@ -1982,17 +2295,24 @@ function updateStreamDimensions() {{
   }}
   previewCanvas.style.aspectRatio = outW + ' / ' + outH;
 
-  const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
-  const g = gcd(sensorNativeW, sensorNativeH) || 1;
-  const arW = Math.round(sensorNativeW / g);
-  const arH = Math.round(sensorNativeH / g);
-  const arLabel = (arW <= 32 && arH <= 32) ? (arW + ':' + arH) : (sensorNativeW / sensorNativeH).toFixed(2) + ':1';
+  const sensorAr = formatAspectRatioLabel(sensorNativeW, sensorNativeH);
+  const outAr = formatAspectRatioLabel(outW, outH);
+  const maxLensCapStr = (lensMaxW > 0 && lensMaxH > 0)
+    ? (' • Max Obiettivo: ' + lensMaxW + '×' + lensMaxH)
+    : '';
 
-  sensorInfoTxt.textContent = 'Sensore: ' + sensorNativeW + '×' + sensorNativeH + ' (' + arLabel + ')';
-  txInfoTxt.textContent = 'Output PC: ' + outW + '×' + outH + ' @ ' + getSelectedFps() + ' FPS';
+  sensorInfoTxt.textContent = 'Sensore: ' + sensorNativeW + '×' + sensorNativeH + ' (' + sensorAr + ')' + maxLensCapStr;
+  txInfoTxt.textContent = 'Output PC: ' + outW + '×' + outH + ' (' + outAr + ') @ ' + getSelectedFps() + ' FPS';
+
+  if (streamingMode === 'camera' || streamingMode === 'photo' || streamingMode === 'test') {{
+    setBadgeStatus('🟢 LIVE (' + outW + '×' + outH + ' @ ' + getSelectedFps() + ' FPS)');
+  }}
 }}
 
-video.addEventListener('loadedmetadata', updateStreamDimensions);
+video.addEventListener('loadedmetadata', () => {{
+  inspectActiveLensCapabilities();
+  updateStreamDimensions();
+}});
 video.addEventListener('resize', updateStreamDimensions);
 window.addEventListener('resize', () => {{
   setTimeout(updateStreamDimensions, 150);
@@ -2012,20 +2332,23 @@ async function startLiveCamera(userInitiated) {{
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {{
     if (!window.isSecureContext && location.protocol === 'http:') {{
       document.getElementById('httpsBanner').style.display = 'block';
-      badge.textContent = '🔒 Browser in HTTP: premi il pulsante verde HTTPS sopra per il permesso fotocamera!';
+      setBadgeStatus('🔒 Browser in HTTP: premi il pulsante verde HTTPS sopra per il permesso fotocamera!');
       if (userInitiated) {{
         switchToHttpsNow();
       }}
       return;
     }}
-    badge.textContent = '⚠️ API Fotocamera non disponibile in questo browser.';
+    setBadgeStatus('⚠️ API Fotocamera non disponibile in questo browser.');
     return;
   }}
 
   const fps = getSelectedFps();
+  const [capW, capH] = getTargetCameraCaptureDimensions();
   const chosenId = cameraSel.value;
   let videoConstraints = {{
-    frameRate: {{ ideal: fps }}
+    width: {{ ideal: capW }},
+    height: {{ ideal: capH }},
+    frameRate: {{ ideal: fps, max: fps }}
   }};
 
   if (chosenId === 'env_default' || !chosenId) {{
@@ -2037,7 +2360,7 @@ async function startLiveCamera(userInitiated) {{
   }}
 
   try {{
-    badge.textContent = '⏳ Richiesta permesso fotocamera in corso...';
+    setBadgeStatus('⏳ Richiesta permesso fotocamera in corso...');
     if (currentStream) {{
       currentStream.getTracks().forEach(t => t.stop());
       currentStream = null;
@@ -2049,7 +2372,6 @@ async function startLiveCamera(userInitiated) {{
         audio: false
       }});
     }} catch (firstErr) {{
-      // Fallback if exact constraint failed on a specific lens
       currentStream = await navigator.mediaDevices.getUserMedia({{
         video: true,
         audio: false
@@ -2059,19 +2381,20 @@ async function startLiveCamera(userInitiated) {{
     video.srcObject = currentStream;
     await video.play();
 
-    // Populate the dropdown with all real phone cameras now that permission is granted!
+    // Populate the dropdown with all real phone cameras & inspect hardware lens capabilities
     await refreshCameraList(true);
+    inspectActiveLensCapabilities();
 
-    sensorNativeW = video.videoWidth || 640;
-    sensorNativeH = video.videoHeight || 480;
+    sensorNativeW = video.videoWidth || 1280;
+    sensorNativeH = video.videoHeight || 720;
     streamingMode = 'camera';
     updateStreamDimensions();
     enableWakeLockAntiStandby();
 
-    badge.textContent = '🟢 IN TRASMISSIONE LIVE VERSO SMARTCAM PC';
+    setBadgeStatus('🟢 LIVE (' + txCanvas.width + '×' + txCanvas.height + ' @ ' + getSelectedFps() + ' FPS)');
     scheduleNextFrame();
   }} catch (err) {{
-    badge.textContent = '⚠️ Permesso fotocamera negato o bloccato (' + err.name + ') — Concedi il permesso nel lucchetto del browser';
+    setBadgeStatus('⚠️ Permesso fotocamera negato o bloccato (' + err.name + ') — Concedi il permesso nel lucchetto del browser');
   }}
 }}
 
@@ -2164,11 +2487,10 @@ function onNativePhoto(ev) {{
     const img = new Image();
     img.onload = function() {{
       loadedImage = img;
-      sensorNativeW = img.naturalWidth || 640;
-      sensorNativeH = img.naturalHeight || 480;
+      sensorNativeW = img.naturalWidth || 1280;
+      sensorNativeH = img.naturalHeight || 720;
       streamingMode = 'photo';
       updateStreamDimensions();
-      badge.textContent = '🟢 FOTO NATIVA IN TRASMISSIONE AL PC';
       scheduleNextFrame();
     }};
     img.src = e.target.result;
@@ -2178,19 +2500,23 @@ function onNativePhoto(ev) {{
 
 function startInteractiveTestStream() {{
   enableWakeLockAntiStandby();
-  sensorNativeW = 640;
-  sensorNativeH = 480;
+  sensorNativeW = 1280;
+  sensorNativeH = 720;
   streamingMode = 'test';
   updateStreamDimensions();
-  badge.textContent = '🟢 SEGNALE DI TEST ATTIVO VERSO IL PC';
   scheduleNextFrame();
 }}
 
+// Draws the camera/image source with center-crop (aspect-fill) so non-native aspect ratios never stretch or squish!
 function drawSourceWithRotationAndMirror(sourceElem, srcW, srcH) {{
   const outW = txCanvas.width;
   const outH = txCanvas.height;
   const rot = getEffectiveRotationDeg();
   const mirror = document.getElementById('mirrorSel').value === '1';
+
+  const drawW = (rot === 90 || rot === 270) ? outH : outW;
+  const drawH = (rot === 90 || rot === 270) ? outW : outH;
+  const [sx, sy, sw, sh] = computeCenterCropRect(srcW, srcH, drawW, drawH);
 
   txCtx.save();
   txCtx.translate(outW / 2, outH / 2);
@@ -2200,9 +2526,7 @@ function drawSourceWithRotationAndMirror(sourceElem, srcW, srcH) {{
   if (rot !== 0) {{
     txCtx.rotate((rot * Math.PI) / 180);
   }}
-  const drawW = (rot === 90 || rot === 270) ? outH : outW;
-  const drawH = (rot === 90 || rot === 270) ? outW : outH;
-  txCtx.drawImage(sourceElem, -drawW / 2, -drawH / 2, drawW, drawH);
+  txCtx.drawImage(sourceElem, sx, sy, sw, sh, -drawW / 2, -drawH / 2, drawW, drawH);
   txCtx.restore();
 
   // Only copy to the visible screen canvas if local preview is ON and Blackout Saver is OFF
@@ -2216,6 +2540,7 @@ function sendCurrentTxCanvasFrame() {{
   busySending = true;
   const w = txCanvas.width;
   const h = txCanvas.height;
+  const jpegQuality = getAdaptiveJpegQuality(w, h);
 
   // Send compressed JPEG blob (~15x lighter on Wi-Fi bandwidth than raw RGBA!)
   if (txCanvas.toBlob) {{
@@ -2230,32 +2555,57 @@ function sendCurrentTxCanvasFrame() {{
           headers: {{ 'Content-Type': 'image/jpeg' }},
           body: blob
         }});
-        if (res.ok) {{
-          sentFrames++;
-          if (!blackoutActive) {{
-            badge.textContent = '🟢 LIVE (' + w + '×' + h + ' @ ' + getSelectedFps() + ' FPS) — ' + sentFrames + ' frame';
-          }}
+        if (res.ok && !blackoutActive) {{
+          setBadgeStatus('🟢 LIVE (' + w + '×' + h + ' @ ' + getSelectedFps() + ' FPS)');
         }}
       }} catch (e) {{
-        if (!blackoutActive) badge.textContent = '🔴 Riconnessione al PC...';
+        if (!blackoutActive) setBadgeStatus('🔴 Riconnessione al PC...');
       }} finally {{
         busySending = false;
       }}
-    }}, 'image/jpeg', 0.82);
+    }}, 'image/jpeg', jpegQuality);
   }} else {{
     busySending = false;
   }}
 }}
 
 function scheduleNextFrame() {{
-  if (pumpTimerId) clearTimeout(pumpTimerId);
+  if (pumpTimerId) {{
+    clearTimeout(pumpTimerId);
+    pumpTimerId = null;
+  }}
   const fps = getSelectedFps();
   const intervalMs = Math.max(16, Math.round(1000 / fps));
-  pumpTimerId = setTimeout(pumpFrames, intervalMs);
+
+  // Synchronize with real hardware camera frames via `requestVideoFrameCallback` when available and visible
+  if (streamingMode === 'camera' && 'requestVideoFrameCallback' in HTMLVideoElement.prototype && document.visibilityState === 'visible') {{
+    if (!rvfcHandle) {{
+      rvfcHandle = video.requestVideoFrameCallback((now) => {{
+        rvfcHandle = null;
+        if (now - lastFrameSentTs >= intervalMs * 0.82) {{
+          lastFrameSentTs = now;
+          pumpFrames();
+        }} else {{
+          scheduleNextFrame();
+        }}
+      }});
+    }}
+    // Backup timer in case camera track stalls or browser throttles rVFC
+    pumpTimerId = setTimeout(pumpFrames, Math.max(intervalMs * 2, 120));
+  }} else {{
+    pumpTimerId = setTimeout(pumpFrames, intervalMs);
+  }}
 }}
 
 function pumpFrames() {{
   if (streamingMode === 'none') return;
+
+  // Skip canvas rendering & scaling if the previous HTTP frame upload is still in flight
+  if (busySending) {{
+    scheduleNextFrame();
+    return;
+  }}
+
   animTick++;
 
   if (streamingMode === 'camera' && video.readyState >= 2) {{
@@ -2283,7 +2633,7 @@ function pumpFrames() {{
     txCtx.textAlign = 'center';
     txCtx.fillText('SMARTCAM OLED LIVE', w / 2, 38);
     txCtx.font = '14px sans-serif';
-    txCtx.fillText('Frame #' + sentFrames + ' (' + w + '×' + h + ')', w / 2, h - 20);
+    txCtx.fillText(w + '×' + h + ' @ ' + getSelectedFps() + ' FPS', w / 2, h - 20);
     if (localPreviewEnabled && !blackoutActive) {{
       previewCtx.drawImage(txCanvas, 0, 0);
     }}
@@ -2294,6 +2644,7 @@ function pumpFrames() {{
 }}
 
 // Initialize standby canvas & check HTTPS permission context
+rebuildResolutionDropdownOptions(sensorNativeW, sensorNativeH);
 previewCtx.fillStyle = '#000000';
 previewCtx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
 previewCtx.strokeStyle = '#1f2937';
@@ -2326,7 +2677,7 @@ pub fn builtin_plugins() -> Vec<PluginMetadata> {
         PluginMetadata {
             id: PLUGIN_ID_PHONE_CAMERA.to_string(),
             name: "📱 Fotocamera Smartphone (Wi-Fi / USB / IP Cam)".to_string(),
-            version: "2.0.0".to_string(),
+            version: "2.1.0".to_string(),
             author: "Rubens Rainelli".to_string(),
             description: "Server HTTP integrato + client MJPEG con porta configurabile e sblocco Firewall: apri l'URL mostrato a schermo sul browser del telefono per trasmettere la fotocamera live.".to_string(),
             category: PluginCategory::CameraInput,
@@ -2401,6 +2752,9 @@ pub struct PluginRegistry {
     plugins: Vec<PluginMetadata>,
     external_handles: Vec<ExternalDllPlugin>,
     phone_frame_counter: u64,
+    phone_last_read_seq: u64,
+    phone_last_read_dims: (u32, u32),
+    phone_last_read_ptr: usize,
     phone_port: u16,
     phone_shared_frame: Arc<Mutex<PhoneFrameSharedState>>,
     phone_received_frames: Arc<AtomicU64>,
@@ -2428,6 +2782,9 @@ impl PluginRegistry {
             plugins: builtin_plugins(),
             external_handles: Vec::new(),
             phone_frame_counter: 0,
+            phone_last_read_seq: 0,
+            phone_last_read_dims: (0, 0),
+            phone_last_read_ptr: 0,
             phone_port: DEFAULT_PHONE_SERVER_PORT,
             phone_shared_frame: shared_frame,
             phone_received_frames: received_frames,
@@ -2601,6 +2958,7 @@ impl PluginRegistry {
             }
             guard.width = width;
             guard.height = height;
+            guard.frame_seq = guard.frame_seq.wrapping_add(1);
             guard.last_received = Some(Instant::now());
             guard.source_tag = "Direct Push BGRA32".to_string();
         } else {
@@ -3036,7 +3394,7 @@ impl PluginRegistry {
             if p.id == PLUGIN_ID_PHONE_CAMERA {
                 if p.enabled {
                     let srv_tag = if rx_frames > 0 {
-                        format!("Connesso: {} frame ricevuti", rx_frames)
+                        "Connesso: Streaming Live attivo".to_string()
                     } else if srv_running {
                         format!("Server HTTP attivo su {}", lan_url)
                     } else {
@@ -3204,7 +3562,16 @@ impl PluginRegistry {
                         if out_bgra.len() < frame_bytes {
                             out_bgra.resize(frame_bytes, 255);
                         }
-                        out_bgra[..frame_bytes].copy_from_slice(&guard.bgra[..frame_bytes]);
+                        let out_ptr = out_bgra.as_ptr() as usize;
+                        if guard.frame_seq != self.phone_last_read_seq
+                            || self.phone_last_read_dims != (fw, fh)
+                            || self.phone_last_read_ptr != out_ptr
+                        {
+                            out_bgra[..frame_bytes].copy_from_slice(&guard.bgra[..frame_bytes]);
+                            self.phone_last_read_seq = guard.frame_seq;
+                            self.phone_last_read_dims = (fw, fh);
+                            self.phone_last_read_ptr = out_ptr;
+                        }
                         return Some((fw, fh));
                     }
                 }
@@ -3238,7 +3605,9 @@ impl PluginRegistry {
                 .unwrap_or_else(|| "http://192.168.1.120:8080/shot.jpg".to_string());
 
             if let Ok(mut g) = self.phone_remote_pull_url.lock() {
-                *g = ep.clone();
+                if *g != ep {
+                    *g = ep.clone();
+                }
             }
 
             if let Ok(guard) = self.phone_shared_frame.lock() {
@@ -3254,7 +3623,16 @@ impl PluginRegistry {
                         if out_bgra.len() < frame_bytes {
                             out_bgra.resize(frame_bytes, 255);
                         }
-                        out_bgra[..frame_bytes].copy_from_slice(&guard.bgra[..frame_bytes]);
+                        let out_ptr = out_bgra.as_ptr() as usize;
+                        if guard.frame_seq != self.phone_last_read_seq
+                            || self.phone_last_read_dims != (fw, fh)
+                            || self.phone_last_read_ptr != out_ptr
+                        {
+                            out_bgra[..frame_bytes].copy_from_slice(&guard.bgra[..frame_bytes]);
+                            self.phone_last_read_seq = guard.frame_seq;
+                            self.phone_last_read_dims = (fw, fh);
+                            self.phone_last_read_ptr = out_ptr;
+                        }
                         return Some((fw, fh));
                     }
                 }
@@ -4539,6 +4917,15 @@ mod tests {
         let (qr_size, qr_mods) = generate_qr_code_matrix("https://192.168.1.55:8080");
         assert_eq!(qr_size, 25);
         assert_eq!(qr_mods.len(), 25 * 25);
+
+        let html = build_smartphone_transmitter_html("192.168.1.55", 8080);
+        assert!(html.contains("id=\"aspectSel\""));
+        assert!(html.contains("id=\"resSel\""));
+        assert!(html.contains("getCapabilities"));
+        assert!(html.contains("requestVideoFrameCallback"));
+        assert!(html.contains("desynchronized: true"));
+        assert!(!html.contains("sentFrames"));
+        assert!(!html.contains("willReadFrequently"));
 
         let mut bgra = vec![40u8; 64 * 64 * 4];
         for px in bgra.chunks_exact_mut(4) {

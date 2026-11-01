@@ -117,13 +117,43 @@ pub fn compute_greenscreen_mask_scalar(
             let c2 = src_row[px + 2];
 
             let (r, g, b) = if is_bgra { (c2, c1, c0) } else { (c0, c1, c2) };
-            let (hue, sat, val) = rgb_to_hsv_fast(r, g, b);
+            let cmax = r.max(g).max(b);
+            if cmax < v_min || cmax > v_max {
+                dst_row[x] = 255;
+                continue;
+            }
+            let cmin = r.min(g).min(b);
+            let delta = cmax - cmin;
+            if delta == 0 {
+                let is_green = h_min == 0 && s_min == 0;
+                dst_row[x] = if is_green { 0 } else { 255 };
+                continue;
+            }
+            let sat = (((delta as u32) * 255) / (cmax as u32)) as u8;
+            if sat < s_min || sat > s_max {
+                dst_row[x] = 255;
+                continue;
+            }
 
-            let is_green = (hue >= h_min && hue <= h_max)
-                && (sat >= s_min && sat <= s_max)
-                && (val >= v_min && val <= v_max);
+            let hue: i32 = if cmax == r {
+                let h_val = (30 * (g as i32 - b as i32)) / (delta as i32);
+                if h_val < 0 {
+                    h_val + 180
+                } else {
+                    h_val
+                }
+            } else if cmax == g {
+                60 + (30 * (b as i32 - r as i32)) / (delta as i32)
+            } else {
+                120 + (30 * (r as i32 - g as i32)) / (delta as i32)
+            };
+            let h_clamped = hue.clamp(0, 180) as u8;
 
-            dst_row[x] = if is_green { 0 } else { 255 };
+            dst_row[x] = if h_clamped >= h_min && h_clamped <= h_max {
+                0
+            } else {
+                255
+            };
         }
     }
     true
@@ -251,6 +281,7 @@ pub struct GreenScreenSegmenter {
     config: GreenScreenConfig,
     scratch_a: Vec<u8>,
     scratch_b: Vec<u8>,
+    col_sums: Vec<u32>,
 }
 
 impl GreenScreenSegmenter {
@@ -259,6 +290,7 @@ impl GreenScreenSegmenter {
             config,
             scratch_a: Vec::new(),
             scratch_b: Vec::new(),
+            col_sums: Vec::new(),
         }
     }
 
@@ -554,12 +586,13 @@ impl GreenScreenSegmenter {
         for y in 0..h {
             let y0 = (y as i32 - r).max(0) as usize;
             let y1 = (y as i32 + r).min((h as i32) - 1) as usize;
-            for x in 0..w {
-                let mut vmin = 255u8;
-                for ky in y0..=y1 {
-                    vmin = vmin.min(self.scratch_a[ky * w + x]);
+            let dst_row = &mut self.scratch_b[y * w..(y + 1) * w];
+            dst_row.copy_from_slice(&self.scratch_a[y0 * w..(y0 + 1) * w]);
+            for ky in (y0 + 1)..=y1 {
+                let src_row = &self.scratch_a[ky * w..(ky + 1) * w];
+                for x in 0..w {
+                    dst_row[x] = dst_row[x].min(src_row[x]);
                 }
-                self.scratch_b[y * w + x] = vmin;
             }
         }
 
@@ -581,12 +614,12 @@ impl GreenScreenSegmenter {
             let dst_row = &mut mask[y * stride as usize..y * stride as usize + w];
             let y0 = (y as i32 - r).max(0) as usize;
             let y1 = (y as i32 + r).min((h as i32) - 1) as usize;
-            for x in 0..w {
-                let mut vmax = 0u8;
-                for ky in y0..=y1 {
-                    vmax = vmax.max(self.scratch_a[ky * w + x]);
+            dst_row.copy_from_slice(&self.scratch_a[y0 * w..(y0 + 1) * w]);
+            for ky in (y0 + 1)..=y1 {
+                let src_row = &self.scratch_a[ky * w..(ky + 1) * w];
+                for x in 0..w {
+                    dst_row[x] = dst_row[x].max(src_row[x]);
                 }
-                dst_row[x] = vmax;
             }
         }
     }
@@ -604,6 +637,9 @@ impl GreenScreenSegmenter {
         let total = w * h;
         if self.scratch_a.len() < total {
             self.scratch_a.resize(total, 0);
+        }
+        if self.col_sums.len() < w {
+            self.col_sums.resize(w, 0);
         }
 
         let r = radius.clamp(1, 32) as i32;
@@ -630,21 +666,29 @@ impl GreenScreenSegmenter {
             }
         }
 
-        // Vertical O(1) sliding window
-        for x in 0..w {
-            let mut sum = 0u32;
-            for k in -r..=r {
-                let sy = k.clamp(0, (h as i32) - 1) as usize;
-                sum += self.scratch_a[sy * w + x] as u32;
+        // Vertical O(1) sliding window (row-major for L1 cache locality)
+        self.col_sums[..w].fill(0);
+        for k in -r..=r {
+            let sy = k.clamp(0, (h as i32) - 1) as usize;
+            let row = &self.scratch_a[sy * w..(sy + 1) * w];
+            for x in 0..w {
+                self.col_sums[x] += row[x] as u32;
             }
+        }
 
-            for y in 0..h {
-                mask[y * stride as usize + x] = (sum / diam) as u8;
-                let top_y = (y as i32 - r).max(0) as usize;
-                let bot_y = (y as i32 + r + 1).min((h as i32) - 1) as usize;
-                sum = sum
-                    .wrapping_add(self.scratch_a[bot_y * w + x] as u32)
-                    .wrapping_sub(self.scratch_a[top_y * w + x] as u32);
+        for y in 0..h {
+            let dst_row = &mut mask[y * stride as usize..y * stride as usize + w];
+            let top_y = (y as i32 - r).max(0) as usize;
+            let bot_y = (y as i32 + r + 1).min((h as i32) - 1) as usize;
+            let top_row = &self.scratch_a[top_y * w..(top_y + 1) * w];
+            let bot_row = &self.scratch_a[bot_y * w..(bot_y + 1) * w];
+
+            for x in 0..w {
+                let sum = self.col_sums[x];
+                dst_row[x] = (sum / diam) as u8;
+                self.col_sums[x] = sum
+                    .wrapping_add(bot_row[x] as u32)
+                    .wrapping_sub(top_row[x] as u32);
             }
         }
     }

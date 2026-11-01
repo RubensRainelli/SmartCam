@@ -543,13 +543,46 @@ impl AiOnnxSegmenter {
         }
 
         // Reference Background Subtraction or Dynamic Silhouette Mask
+        let inv_w = 1.0 / (w.max(1) as f32);
+        let inv_h = 1.0 / (h.max(1) as f32);
+        let inv_255 = 1.0 / 255.0f32;
+        let luma_gate = (0.04 + tol * 0.14).clamp(0.04, 0.20);
+        let gain = (5.2 - tol * 3.0).clamp(1.8, 5.0);
+        let cutoff = (thresh * 0.30 + tol * 0.22).clamp(0.10, 0.65);
+        let inv_022 = 1.0 / 0.22f32;
+        let inv_030 = 1.0 / 0.30f32;
+        let thresh_m015 = thresh - 0.15;
+        let inv_head_rx = 1.0 / head_rx;
+        let inv_head_ry = 1.0 / head_ry;
+        let inv_head_rx_115 = 1.0 / (head_rx * 1.15);
+        let inv_head_ry_115 = 1.0 / (head_ry * 1.15);
+        let inv_body_rx = 1.0 / body_rx;
+        let inv_body_ry = 1.0 / body_ry;
+        let use_ref_bg = self.has_reference_bg && !self.ref_bg_buf.is_empty();
+        let rw = self.ref_bg_w as usize;
+        let rh = self.ref_bg_h as usize;
+        let w_max1 = w.max(1);
+        let h_max1 = h.max(1);
+
         for y in 0..h {
-            let ny = (y as f32) / (h.max(1) as f32);
+            let ny = (y as f32) * inv_h;
             let s_row = y * (stride_in as usize);
             let m_row = y * (stride_out as usize);
+            let head_dy = (ny - (cy - 0.03)) * inv_head_ry;
+            let head_dy2 = head_dy * head_dy;
+            let head_dy_115 = (ny - (cy - 0.03)) * inv_head_ry_115;
+            let head_dy2_115 = head_dy_115 * head_dy_115;
+            let body_dy = (ny - (cy + 0.36)) * inv_body_ry;
+            let body_dy2 = body_dy * body_dy;
+            let ry = if use_ref_bg {
+                ((y * rh) / h_max1).min(rh.saturating_sub(1))
+            } else {
+                0
+            };
+            let ry_row_off = ry * rw;
 
             for x in 0..w {
-                let nx = (x as f32) / (w.max(1) as f32);
+                let nx = (x as f32) * inv_w;
                 let px = s_row + x * 4;
                 let c0 = input_frame[px + 0];
                 let c1 = input_frame[px + 1];
@@ -563,12 +596,9 @@ impl AiOnnxSegmenter {
                     continue;
                 }
 
-                if self.has_reference_bg && !self.ref_bg_buf.is_empty() {
-                    let rw = self.ref_bg_w as usize;
-                    let rh = self.ref_bg_h as usize;
-                    let rx = ((x * rw) / w.max(1)).min(rw.saturating_sub(1));
-                    let ry = ((y * rh) / h.max(1)).min(rh.saturating_sub(1));
-                    let rbase = (ry * rw + rx) * 4;
+                if use_ref_bg {
+                    let rx = ((x * rw) / w_max1).min(rw.saturating_sub(1));
+                    let rbase = (ry_row_off + rx) * 4;
 
                     let (r_ref, g_ref, b_ref) = if is_bgra {
                         (
@@ -593,42 +623,36 @@ impl AiOnnxSegmenter {
                     let cr_ref = r_ref as i32 - y_ref_val;
 
                     let d_chroma =
-                        ((cb_cur - cb_ref).abs() + (cr_cur - cr_ref).abs()) as f32 / 255.0;
-                    let d_luma = (y_cur - y_ref_val).abs() as f32 / 255.0;
-                    let luma_gate = (0.04 + tol * 0.14).clamp(0.04, 0.20);
+                        ((cb_cur - cb_ref).abs() + (cr_cur - cr_ref).abs()) as f32 * inv_255;
+                    let d_luma = (y_cur - y_ref_val).abs() as f32 * inv_255;
                     let eff_luma = (d_luma - luma_gate).max(0.0);
 
                     let diff = d_chroma * 1.45 + eff_luma * 0.85;
-                    let gain = (5.2 - tol * 3.0).clamp(1.8, 5.0);
                     let mut prob = (diff * gain).clamp(0.0, 1.0);
 
                     if face_only {
-                        let head_dx = (nx - cx) / (head_rx * 1.15);
-                        let head_dy = (ny - (cy - 0.03)) / (head_ry * 1.15);
-                        let head_d2 = head_dx * head_dx + head_dy * head_dy;
+                        let head_dx = (nx - cx) * inv_head_rx_115;
+                        let head_d2 = head_dx * head_dx + head_dy2_115;
                         let head_gate = (1.35 - head_d2).clamp(0.0, 1.0);
                         prob *= head_gate;
                     }
 
-                    let cutoff = (thresh * 0.30 + tol * 0.22).clamp(0.10, 0.65);
-                    let t = ((prob - cutoff) / 0.22).clamp(0.0, 1.0);
+                    let t = ((prob - cutoff) * inv_022).clamp(0.0, 1.0);
                     out_mask[m_row + x] = (t * t * (3.0 - 2.0 * t) * 255.0) as u8;
                 } else {
-                    let head_dx = (nx - cx) / head_rx;
-                    let head_dy = (ny - (cy - 0.03)) / head_ry;
-                    let head_d2 = head_dx * head_dx + head_dy * head_dy;
+                    let head_dx = (nx - cx) * inv_head_rx;
+                    let head_d2 = head_dx * head_dx + head_dy2;
 
                     let min_d2 = if face_only {
                         head_d2
                     } else {
-                        let body_dx = (nx - cx) / body_rx;
-                        let body_dy = (ny - (cy + 0.36)) / body_ry;
-                        let body_d2 = body_dx * body_dx + body_dy * body_dy;
+                        let body_dx = (nx - cx) * inv_body_rx;
+                        let body_d2 = body_dx * body_dx + body_dy2;
                         head_d2.min(body_d2)
                     };
 
                     let prob = (1.32 - min_d2).clamp(0.0, 1.0);
-                    let t = ((prob - (thresh - 0.15)) / 0.30).clamp(0.0, 1.0);
+                    let t = ((prob - thresh_m015) * inv_030).clamp(0.0, 1.0);
                     out_mask[m_row + x] = (t * t * (3.0 - 2.0 * t) * 255.0) as u8;
                 }
             }
