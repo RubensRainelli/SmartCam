@@ -30,7 +30,7 @@ Alla pubblicazione di una release va sempre incrementata la versione seguendo lo
 4. `platforms/windows/installer/smartcam.iss` (`MyAppVersion` and `OutputBaseFilename=SmartCam-Setup-vA.B.C-x64`)
 5. `.github/workflows/release.yml` (`SMARTCAM_VERSION: "A.B.C"` and artifact filenames)
 6. `CHANGELOG.md`, `README.md`, `README.it.md`, `docs/index.html`, `docs/ARCHITECTURE.md`
-7. **WinGet (`microsoft/winget-pkgs`)**: After the signed installer `SmartCam-Setup-vA.B.C-x64.exe` is built and uploaded to the GitHub Release `vA.B.C`, compute its exact `SHA256` and publish/update the WinGet manifests under `manifests/r/RubensRainelli/SmartCam/A.B.C/` via a PR to `microsoft/winget-pkgs`.
+7. **WinGet (`microsoft/winget-pkgs`)**: After the signed installer `SmartCam-Setup-vA.B.C-x64.exe` is built and uploaded to the GitHub Release `vA.B.C`, compute its exact `SHA256`, validate locally with `winget validate`, and publish/update the WinGet manifests under `manifests/r/RubensRainelli/SmartCam/A.B.C/` via a PR to `microsoft/winget-pkgs`. Immediately post `@microsoft-github-policy-service agree` on the newly created PR (`gh pr comment <PR> --repo microsoft/winget-pkgs --body "@microsoft-github-policy-service agree"`) if the `microsoft-github-policy-service` bot adds the `Needs-CLA` label.
 
 ---
 
