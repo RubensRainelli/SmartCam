@@ -99,17 +99,14 @@ fn main() {
         res.set_icon_with_id("../assets/icons/smartcam_emerald_cam.ico", "102");
         res.set_icon_with_id("../assets/icons/smartcam_neon_iris.ico", "103");
         res.set("ProductName", "SmartCam");
-        res.set(
-            "FileDescription",
-            "SmartCam",
-        );
+        res.set("FileDescription", "SmartCam");
         res.set("CompanyName", "Rubens Rainelli");
         res.set(
             "LegalCopyright",
             "Copyright (c) 2026 Rubens Rainelli (PEFL v1.0)",
         );
-        res.set("FileVersion", "2.1.0.0");
-        res.set("ProductVersion", "2.1.0.0");
+        res.set("FileVersion", "2.1.1.0");
+        res.set("ProductVersion", "2.1.1.0");
         let _ = res.compile();
     }
 }

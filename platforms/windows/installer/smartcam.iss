@@ -2,11 +2,11 @@
 ; Version 1.0 - 2026-05-26
 ; Copyright (c) 2026 Rubens Rainelli
 ;
-; SmartCam v2.1.0 — Official Windows x64 Installer (Inno Setup 6)
+; SmartCam v2.1.1 — Official Windows x64 Installer (Inno Setup 6)
 ; Pure Rust + Windows Media Foundation Virtual Camera Architecture
 
 #define MyAppName "SmartCam"
-#define MyAppVersion "2.1.0"
+#define MyAppVersion "2.1.1"
 #define MyAppPublisher "Rubens Rainelli"
 #define MyAppURL "https://github.com/RubensRainelli/SmartCam"
 #define MyAppExeName "SmartCam.exe"
@@ -28,7 +28,7 @@ DisableProgramGroupPage=yes
 LicenseFile=LICENSE
 SourceDir=..\..\..
 OutputDir=dist
-OutputBaseFilename=SmartCam-Setup-v2.1.0-x64
+OutputBaseFilename=SmartCam-Setup-v2.1.1-x64
 SetupIconFile=assets\icons\smartcam.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
@@ -51,17 +51,24 @@ Name: "autostart"; Description: "Start SmartCam automatically when Windows start
 [Dirs]
 Name: "{app}"; Permissions: users-modify
 Name: "{app}\config"; Permissions: users-modify
-Name: "{sd}\Users\Public\SmartCam"; Permissions: users-modify
+Name: "{commonappdata}\SmartCam"
 
 [InstallDelete]
 Type: filesandordirs; Name: "{localappdata}\Programs\SmartCam"
+Type: filesandordirs; Name: "{sd}\Users\Public\SmartCam"
+Type: files; Name: "{sd}\Users\Public\SmartCam_MF_SharedFrame_v1.ipc"
 Type: files; Name: "{app}\smartcam_engine*.dll"
 Type: files; Name: "{app}\smartcam_win_bridge.dll"
+
+[UninstallDelete]
+Type: filesandordirs; Name: "{commonappdata}\SmartCam"
+Type: filesandordirs; Name: "{sd}\Users\Public\SmartCam"
+Type: files; Name: "{sd}\Users\Public\SmartCam_MF_SharedFrame_v1.ipc"
 
 [Files]
 Source: "target\release\SmartCam.exe"; DestDir: "{app}"; Flags: ignoreversion 64bit
 Source: "target\release\smartcam_mf_source.dll"; DestDir: "{app}"; Flags: ignoreversion 64bit
-Source: "target\release\smartcam_mf_source.dll"; DestDir: "{sd}\Users\Public\SmartCam"; Flags: ignoreversion 64bit
+Source: "target\release\smartcam_mf_source.dll"; DestDir: "{commonappdata}\SmartCam"; Flags: ignoreversion 64bit
 Source: "platforms\windows\installer\smartcam_publisher.cer"; DestDir: "{app}"; Flags: ignoreversion
 Source: "assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "config\default_config.yaml"; DestDir: "{app}\config"; Flags: ignoreversion onlyifdoesntexist
@@ -82,11 +89,11 @@ Root: HKCU; Subkey: "SOFTWARE\Classes\CLSID\{#LegacyDShowCategoryId}\Instance\{#
 ; Media Foundation Virtual Camera COM InprocServer32 Registration (Single driver named "SmartCam")
 Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}"; ValueType: string; ValueName: ""; ValueData: "SmartCam"; Flags: uninsdeletekey
 Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}"; ValueType: string; ValueName: "FriendlyName"; ValueData: "SmartCam"; Flags: uninsdeletekey
-Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{sd}\Users\Public\SmartCam\smartcam_mf_source.dll"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{commonappdata}\SmartCam\smartcam_mf_source.dll"; Flags: uninsdeletekey
 Root: HKLM; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}\InprocServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Both"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}"; ValueType: string; ValueName: ""; ValueData: "SmartCam"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}"; ValueType: string; ValueName: "FriendlyName"; ValueData: "SmartCam"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{sd}\Users\Public\SmartCam\smartcam_mf_source.dll"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{commonappdata}\SmartCam\smartcam_mf_source.dll"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "SOFTWARE\Classes\CLSID\{#MyAppId}\InprocServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Both"; Flags: uninsdeletekey
 ; Windows 11 Camera Privacy ConsentStore NonPackaged entry for SmartCam.exe
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\webcam\NonPackaged\C:#Program Files#SmartCam#SmartCam.exe"; ValueType: string; ValueName: "Value"; ValueData: "Allow"; Flags: uninsdeletekey

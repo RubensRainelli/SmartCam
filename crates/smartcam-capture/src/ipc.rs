@@ -13,13 +13,27 @@
  * The full license can be found in the LICENSE file.
  */
 
+#[cfg(windows)]
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
+use std::sync::Mutex;
 
 use crate::header::{
     SharedFrameHeader, DEFAULT_SHARED_EVENT_NAME, DEFAULT_SHARED_MAPPING_NAME,
     MAX_SHARED_FRAME_BYTES, SHARED_FRAME_HEADER_BYTES, SHARED_FRAME_MAGIC,
     TOTAL_SHARED_FRAME_BYTES,
 };
+
+/// Optional per-process override for `DEFAULT_SHARED_MAPPING_NAME` / `DEFAULT_SHARED_EVENT_NAME`
+/// so unit and integration tests never touch the system-wide mapping or backing file on disk.
+static TEST_IPC_NAMES_OVERRIDE: Mutex<Option<(String, String)>> = Mutex::new(None);
+
+/// Overrides the default IPC mapping and event names for in-process testing.
+pub fn set_default_ipc_names_for_test(names: Option<(String, String)>) {
+    if let Ok(mut guard) = TEST_IPC_NAMES_OVERRIDE.lock() {
+        *guard = names;
+    }
+}
 
 #[cfg(windows)]
 use windows::{
@@ -28,10 +42,7 @@ use windows::{
         Foundation::{
             CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, INVALID_HANDLE_VALUE,
         },
-        Security::{
-            InitializeSecurityDescriptor, SetSecurityDescriptorDacl, PSECURITY_DESCRIPTOR,
-            SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR,
-        },
+        Security::SECURITY_ATTRIBUTES,
         System::{
             Memory::{
                 CreateFileMappingW, MapViewOfFile, OpenFileMappingW, UnmapViewOfFile,
@@ -44,10 +55,18 @@ use windows::{
 };
 
 #[cfg(windows)]
-const SECURITY_DESCRIPTOR_REVISION: u32 = 1;
+const SDDL_REVISION_1: u32 = 1;
 
 #[cfg(windows)]
-const CROSS_SESSION_BACKING_PATH: &str = r"C:\Users\Public\SmartCam_MF_SharedFrame_v1.ipc";
+const LEGACY_PUBLIC_BACKING_PATH: &str = r"C:\Users\Public\SmartCam_MF_SharedFrame_v1.ipc";
+
+#[cfg(windows)]
+pub fn cross_session_backing_path() -> PathBuf {
+    let prog_data = std::env::var("PROGRAMDATA").unwrap_or_else(|_| r"C:\ProgramData".to_string());
+    PathBuf::from(prog_data)
+        .join("SmartCam")
+        .join("SmartCam_MF_SharedFrame_v1.ipc")
+}
 
 #[cfg(windows)]
 #[link(name = "kernel32")]
@@ -61,29 +80,182 @@ extern "system" {
         dwFlagsAndAttributes: u32,
         hTemplateFile: *mut core::ffi::c_void,
     ) -> *mut core::ffi::c_void;
+    fn GetCurrentProcess() -> *mut core::ffi::c_void;
+    fn LocalFree(hMem: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
+}
+
+#[cfg(windows)]
+#[link(name = "advapi32")]
+extern "system" {
+    fn ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        StringSecurityDescriptor: *const u16,
+        StringSDRevision: u32,
+        SecurityDescriptor: *mut *mut core::ffi::c_void,
+        SecurityDescriptorSize: *mut u32,
+    ) -> i32;
+    fn OpenProcessToken(
+        ProcessHandle: *mut core::ffi::c_void,
+        DesiredAccess: u32,
+        TokenHandle: *mut *mut core::ffi::c_void,
+    ) -> i32;
+    fn GetTokenInformation(
+        TokenHandle: *mut core::ffi::c_void,
+        TokenInformationClass: u32,
+        TokenInformation: *mut core::ffi::c_void,
+        TokenInformationLength: u32,
+        ReturnLength: *mut u32,
+    ) -> i32;
+    fn ConvertSidToStringSidW(Sid: *mut core::ffi::c_void, StringSid: *mut *mut u16) -> i32;
+    fn SetKernelObjectSecurity(
+        Handle: *mut core::ffi::c_void,
+        SecurityInformation: u32,
+        SecurityDescriptor: *const core::ffi::c_void,
+    ) -> i32;
+    #[cfg(test)]
+    fn GetSecurityDescriptorDacl(
+        pSecurityDescriptor: *const core::ffi::c_void,
+        lpbDaclPresent: *mut i32,
+        pDacl: *mut *mut core::ffi::c_void,
+        lpbDaclDefaulted: *mut i32,
+    ) -> i32;
+}
+
+#[cfg(windows)]
+unsafe fn current_process_user_sid_string() -> Option<String> {
+    const TOKEN_QUERY: u32 = 0x0008;
+    const TOKEN_USER_CLASS: u32 = 1;
+
+    let mut token: *mut core::ffi::c_void = core::ptr::null_mut();
+    if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 || token.is_null() {
+        return None;
+    }
+
+    let mut buf = [0usize; 32];
+    let mut ret_len: u32 = 0;
+    let ok = GetTokenInformation(
+        token,
+        TOKEN_USER_CLASS,
+        buf.as_mut_ptr() as *mut core::ffi::c_void,
+        std::mem::size_of_val(&buf) as u32,
+        &mut ret_len,
+    );
+    let _ = CloseHandle(HANDLE(token));
+    if ok == 0 {
+        return None;
+    }
+
+    let sid_ptr = buf[0] as *mut core::ffi::c_void;
+    if sid_ptr.is_null() {
+        return None;
+    }
+
+    let mut wide_sid: *mut u16 = core::ptr::null_mut();
+    if ConvertSidToStringSidW(sid_ptr, &mut wide_sid) == 0 || wide_sid.is_null() {
+        return None;
+    }
+
+    let mut len = 0usize;
+    while *wide_sid.add(len) != 0 {
+        len += 1;
+    }
+    let s = String::from_utf16_lossy(std::slice::from_raw_parts(wide_sid, len));
+    let _ = LocalFree(wide_sid as *mut core::ffi::c_void);
+    Some(s)
+}
+
+/// Builds the SDDL string restricting IPC access exclusively to:
+/// - `SY` (`NT AUTHORITY\SYSTEM`)
+/// - `BA` (`BUILTIN\Administrators`)
+/// - `LS` (`NT AUTHORITY\LOCAL SERVICE`, Windows Camera FrameServer service in Session 0)
+/// - The current interactive user's specific SID (or `IU` if running under a service account)
+///
+/// `D:P` marks the DACL as Protected so permissive ACEs from parent directories are never inherited,
+/// preventing other local user accounts on shared/school PCs from reading or injecting frames.
+#[cfg(windows)]
+pub fn build_ipc_security_descriptor_sddl() -> String {
+    let user_trustee = unsafe { current_process_user_sid_string() }
+        .filter(|sid| sid.starts_with("S-1-5-21-"))
+        .unwrap_or_else(|| "IU".to_string());
+    format!(
+        "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;LS)(A;;GA;;;{})",
+        user_trustee
+    )
+}
+
+#[cfg(windows)]
+struct RestrictedSecurityDescriptor {
+    p_sd: *mut core::ffi::c_void,
+}
+
+#[cfg(windows)]
+impl RestrictedSecurityDescriptor {
+    unsafe fn new() -> Option<Self> {
+        let sddl = build_ipc_security_descriptor_sddl();
+        let wide_sddl: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut p_sd: *mut core::ffi::c_void = core::ptr::null_mut();
+        if ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            wide_sddl.as_ptr(),
+            SDDL_REVISION_1,
+            &mut p_sd,
+            core::ptr::null_mut(),
+        ) != 0
+            && !p_sd.is_null()
+        {
+            Some(Self { p_sd })
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for RestrictedSecurityDescriptor {
+    fn drop(&mut self) {
+        if !self.p_sd.is_null() {
+            unsafe {
+                let _ = LocalFree(self.p_sd);
+            }
+            self.p_sd = core::ptr::null_mut();
+        }
+    }
 }
 
 #[cfg(windows)]
 unsafe fn open_cross_session_backing_file(
     p_sa: *const SECURITY_ATTRIBUTES,
+    p_sd: *const core::ffi::c_void,
     write_access: bool,
 ) -> HANDLE {
     const GENERIC_READ: u32 = 0x8000_0000;
     const GENERIC_WRITE: u32 = 0x4000_0000;
+    const WRITE_DAC: u32 = 0x0004_0000;
     const FILE_SHARE_READ: u32 = 0x0000_0001;
     const FILE_SHARE_WRITE: u32 = 0x0000_0002;
     const FILE_SHARE_DELETE: u32 = 0x0000_0004;
     const OPEN_EXISTING: u32 = 3;
     const OPEN_ALWAYS: u32 = 4;
     const FILE_ATTRIBUTE_TEMPORARY: u32 = 0x0000_0100;
+    const DACL_SECURITY_INFORMATION: u32 = 0x0000_0004;
+    const PROTECTED_DACL_SECURITY_INFORMATION: u32 = 0x8000_0000;
 
-    let wide_path: Vec<u16> = CROSS_SESSION_BACKING_PATH
+    let _ = std::fs::remove_file(LEGACY_PUBLIC_BACKING_PATH);
+    let backing_path = cross_session_backing_path();
+    if write_access {
+        if let Some(parent) = backing_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        // Best-effort unlink of any stale file before creating so new SECURITY_ATTRIBUTES apply cleanly
+        let _ = std::fs::remove_file(&backing_path);
+    }
+
+    let wide_path: Vec<u16> = backing_path
+        .to_string_lossy()
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
 
     let access = if write_access {
-        GENERIC_READ | GENERIC_WRITE
+        GENERIC_READ | GENERIC_WRITE | WRITE_DAC
     } else {
         GENERIC_READ
     };
@@ -102,7 +274,15 @@ unsafe fn open_cross_session_backing_file(
         FILE_ATTRIBUTE_TEMPORARY,
         core::ptr::null_mut(),
     );
-    HANDLE(raw)
+    let handle = HANDLE(raw);
+    if write_access && handle != INVALID_HANDLE_VALUE && !handle.0.is_null() && !p_sd.is_null() {
+        let _ = SetKernelObjectSecurity(
+            raw,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            p_sd,
+        );
+    }
+    handle
 }
 
 /// High-performance shared memory inter-process communication wrapper.
@@ -114,6 +294,8 @@ pub struct SharedFrameIpc {
     mapping_handle: Option<HANDLE>,
     #[cfg(windows)]
     event_handle: Option<HANDLE>,
+    #[cfg(windows)]
+    use_backing_file: bool,
     mapped_view: *mut u8,
     is_producer: bool,
     read_only: bool,
@@ -128,11 +310,21 @@ impl SharedFrameIpc {
     /// Creates or opens a named shared memory mapping and synchronization event.
     #[cfg(windows)]
     pub fn open_or_create(mapping_name: &str, event_name: &str, is_producer: bool) -> Option<Self> {
-        let wide_map: Vec<u16> = mapping_name
+        let override_names = if mapping_name == DEFAULT_SHARED_MAPPING_NAME {
+            TEST_IPC_NAMES_OVERRIDE.lock().ok().and_then(|g| g.clone())
+        } else {
+            None
+        };
+        let (effective_map, effective_ev) = match override_names {
+            Some((ref m, ref e)) => (m.as_str(), e.as_str()),
+            None => (mapping_name, event_name),
+        };
+
+        let wide_map: Vec<u16> = effective_map
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect();
-        let wide_ev: Vec<u16> = event_name
+        let wide_ev: Vec<u16> = effective_ev
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect();
@@ -140,31 +332,20 @@ impl SharedFrameIpc {
         let total_bytes = TOTAL_SHARED_FRAME_BYTES;
         let size_high = ((total_bytes as u64 >> 32) & 0xFFFF_FFFF) as u32;
         let size_low = (total_bytes as u64 & 0xFFFF_FFFF) as u32;
-        let use_backing_file = mapping_name == DEFAULT_SHARED_MAPPING_NAME;
+        let use_backing_file = effective_map == DEFAULT_SHARED_MAPPING_NAME;
 
         unsafe {
-            let mut sd = SECURITY_DESCRIPTOR::default();
+            let sd_guard = RestrictedSecurityDescriptor::new();
             let mut sa = SECURITY_ATTRIBUTES::default();
-            let mut p_sa: *const SECURITY_ATTRIBUTES = std::ptr::null();
-
-            if InitializeSecurityDescriptor(
-                PSECURITY_DESCRIPTOR(&mut sd as *mut _ as *mut core::ffi::c_void),
-                SECURITY_DESCRIPTOR_REVISION,
-            )
-            .is_ok()
-                && SetSecurityDescriptorDacl(
-                    PSECURITY_DESCRIPTOR(&mut sd as *mut _ as *mut core::ffi::c_void),
-                    true,
-                    None,
-                    false,
-                )
-                .is_ok()
-            {
-                sa.nLength = std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32;
-                sa.lpSecurityDescriptor = &mut sd as *mut _ as *mut core::ffi::c_void;
-                sa.bInheritHandle = false.into();
-                p_sa = &sa;
-            }
+            let (p_sa, p_sd): (*const SECURITY_ATTRIBUTES, *const core::ffi::c_void) =
+                if let Some(ref g) = sd_guard {
+                    sa.nLength = std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32;
+                    sa.lpSecurityDescriptor = g.p_sd;
+                    sa.bInheritHandle = false.into();
+                    (&sa as *const SECURITY_ATTRIBUTES, g.p_sd)
+                } else {
+                    (core::ptr::null(), core::ptr::null())
+                };
 
             let mut mapping_handle: Option<HANDLE> = None;
             let mut read_only = false;
@@ -181,11 +362,12 @@ impl SharedFrameIpc {
                     read_only = true;
                 } else if use_backing_file {
                     // Fallback for Windows 11 FrameServer running in Session 0 (where Session 1's Local\ is isolated):
-                    // map the shared backing file in C:\Users\Public so Session 0 and Session 1 share the exact same physical RAM pages.
-                    let mut hfile = open_cross_session_backing_file(p_sa, true);
+                    // map the restricted backing file in %PROGRAMDATA%\SmartCam so Session 0 (LOCAL SERVICE)
+                    // and the interactive user share the exact same physical RAM pages without exposing frames to other users.
+                    let mut hfile = open_cross_session_backing_file(p_sa, p_sd, true);
                     let mut file_ro = false;
                     if hfile == INVALID_HANDLE_VALUE || hfile.0.is_null() {
-                        hfile = open_cross_session_backing_file(p_sa, false);
+                        hfile = open_cross_session_backing_file(p_sa, p_sd, false);
                         file_ro = true;
                     }
                     if hfile != INVALID_HANDLE_VALUE && !hfile.0.is_null() {
@@ -210,7 +392,7 @@ impl SharedFrameIpc {
                 }
             } else {
                 let backing_hfile = if use_backing_file {
-                    let hf = open_cross_session_backing_file(p_sa, true);
+                    let hf = open_cross_session_backing_file(p_sa, p_sd, true);
                     if hf != INVALID_HANDLE_VALUE && !hf.0.is_null() {
                         hf
                     } else {
@@ -303,6 +485,7 @@ impl SharedFrameIpc {
             Some(Self {
                 mapping_handle: Some(handle),
                 event_handle,
+                use_backing_file,
                 mapped_view,
                 is_producer,
                 read_only,
@@ -426,7 +609,9 @@ impl SharedFrameIpc {
         // Rows are read from `y * src_stride` through raw pointers: the stride must cover a row
         // and `src_data` must reach the end of the last row (which needs no padding).
         let src_stride = src_stride as usize;
-        if src_stride < dst_stride || src_data.len() < (height as usize - 1) * src_stride + dst_stride {
+        if src_stride < dst_stride
+            || src_data.len() < (height as usize - 1) * src_stride + dst_stride
+        {
             return false;
         }
 
@@ -586,10 +771,16 @@ impl SharedFrameIpc {
     }
 
     /// Closes and releases shared memory and synchronization objects.
+    /// When called on a producer instance, wipes the frame payload and header in memory
+    /// and unlinks any cross-session backing file so no residual frame ever remains on disk.
     pub fn close(&mut self) {
         #[cfg(windows)]
         unsafe {
             if !self.mapped_view.is_null() {
+                if self.is_producer && !self.read_only {
+                    std::ptr::write_bytes(self.mapped_view, 0, TOTAL_SHARED_FRAME_BYTES);
+                    std::sync::atomic::fence(Ordering::SeqCst);
+                }
                 let _ =
                     UnmapViewOfFile(windows::Win32::System::Memory::MEMORY_MAPPED_VIEW_ADDRESS {
                         Value: self.mapped_view as *mut core::ffi::c_void,
@@ -602,10 +793,20 @@ impl SharedFrameIpc {
             if let Some(ev) = self.event_handle.take() {
                 let _ = CloseHandle(ev);
             }
+            if self.is_producer && self.use_backing_file {
+                let _ = std::fs::remove_file(cross_session_backing_path());
+                let _ = std::fs::remove_file(LEGACY_PUBLIC_BACKING_PATH);
+                self.use_backing_file = false;
+            }
         }
 
         #[cfg(not(windows))]
         {
+            if !self.mapped_view.is_null() && self.is_producer && !self.read_only {
+                unsafe {
+                    std::ptr::write_bytes(self.mapped_view, 0, TOTAL_SHARED_FRAME_BYTES);
+                }
+            }
             self.mapped_view = std::ptr::null_mut();
             self.fallback_buf = None;
         }
@@ -650,7 +851,10 @@ mod tests {
         let ipc = producer("narrow");
         let src = vec![1u8; 4096];
         assert!(!ipc.write_frame(&src, 2, 2, 0, 30, 1, 0, 0), "stride 0");
-        assert!(!ipc.write_frame(&src, 2, 2, 4, 30, 1, 0, 0), "stride 4 for an 8-byte row");
+        assert!(
+            !ipc.write_frame(&src, 2, 2, 4, 30, 1, 0, 0),
+            "stride 4 for an 8-byte row"
+        );
     }
 
     #[test]
@@ -674,6 +878,59 @@ mod tests {
             let row = &out[y * (w * 4) as usize..(y + 1) * (w * 4) as usize];
             let expected: Vec<u8> = (0..(w * 4) as usize).map(|x| (y * 16 + x) as u8).collect();
             assert_eq!(row, &expected[..], "row {y}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn producer_close_wipes_payload_and_uses_non_null_protected_dacl() {
+        unsafe {
+            let sd = RestrictedSecurityDescriptor::new().expect("SDDL descriptor must parse");
+            let mut dacl_present: i32 = 0;
+            let mut p_dacl: *mut core::ffi::c_void = core::ptr::null_mut();
+            let mut dacl_defaulted: i32 = 0;
+            assert_ne!(
+                GetSecurityDescriptorDacl(
+                    sd.p_sd,
+                    &mut dacl_present,
+                    &mut p_dacl,
+                    &mut dacl_defaulted
+                ),
+                0
+            );
+            assert_ne!(dacl_present, 0, "DACL must be present");
+            assert!(
+                !p_dacl.is_null(),
+                "DACL must NOT be a NULL DACL (which would grant Everyone full control)"
+            );
+        }
+
+        let pid = std::process::id();
+        let map_name = format!(r"Local\SmartCam_TestIpcWipe_{pid}");
+        let ev_name = format!(r"Local\SmartCam_TestIpcWipeEv_{pid}");
+
+        let mut prod = SharedFrameIpc::open_or_create(&map_name, &ev_name, true).expect("producer");
+        let cons = SharedFrameIpc::open_or_create(&map_name, &ev_name, false).expect("consumer");
+
+        assert!(prod.write_frame(&[0xA5u8; 64], 4, 4, 16, 30, 1, 999, 1));
+        let mut buf = [0u8; 64];
+        let (mut w, mut h, mut ts) = (0, 0, 0);
+        assert!(cons.read_frame(&mut buf, &mut w, &mut h, &mut ts));
+        assert_eq!(buf, [0xA5u8; 64]);
+
+        // Closing the producer must zero the shared memory payload and header
+        prod.close();
+        assert!(
+            !cons.read_frame(&mut buf, &mut w, &mut h, &mut ts),
+            "consumer must not read stale frames after producer close"
+        );
+        unsafe {
+            let payload = cons.payload().expect("consumer view still mapped");
+            let slice = std::slice::from_raw_parts(payload, 64);
+            assert_eq!(
+                slice, &[0u8; 64],
+                "pixel payload in shared mapping must be zeroed on producer close"
+            );
         }
     }
 }

@@ -248,7 +248,9 @@ pub fn resize_bilinear_roi_scalar(
         let s = stride as usize;
         s >= w as usize * bpp && len >= s * h as usize
     };
-    if !plane_ok(src.len(), src_w, src_h, stride_src) || !plane_ok(dst.len(), dst_w, dst_h, stride_dst) {
+    if !plane_ok(src.len(), src_w, src_h, stride_src)
+        || !plane_ok(dst.len(), dst_w, dst_h, stride_dst)
+    {
         return false;
     }
 
@@ -263,14 +265,31 @@ pub fn resize_bilinear_roi_scalar(
         return true;
     }
 
-    // 16.16 fixed-point bilinear interpolation
-    let scale_x = ((src_roi.width as u64) << 16) / (dst_roi.width as u64);
-    let scale_y = ((src_roi.height as u64) << 16) / (dst_roi.height as u64);
+    // 16.16 fixed-point bilinear interpolation with half-pixel center alignment:
+    // src_coord = ((dst_coord + 0.5) * src_len / dst_len) - 0.5
     let max_src_x = src_roi.width.saturating_sub(1);
     let max_src_y = src_roi.height.saturating_sub(1);
+    let src_rw_i64 = src_roi.width as i64;
+    let dst_rw_i64 = dst_roi.width as i64;
+    let src_rh_i64 = src_roi.height as i64;
+    let dst_rh_i64 = dst_roi.height as i64;
+
+    let mut x_table: Vec<(usize, usize, u32, u32)> = Vec::with_capacity(dst_roi.width as usize);
+    for dx in 0..dst_roi.width {
+        let center_fp =
+            (((2 * (dx as i64) + 1) * src_rw_i64) << 15) / dst_rw_i64 - (1i64 << 15);
+        let sx_fp = center_fp.max(0) as u64;
+        let sx0 = ((sx_fp >> 16) as u32).min(max_src_x);
+        let sx1 = (sx0 + 1).min(max_src_x);
+        let wx = ((sx_fp >> 8) & 0xFF) as u32;
+        let inv_wx = 256 - wx;
+        x_table.push(((sx0 as usize) * bpp, (sx1 as usize) * bpp, wx, inv_wx));
+    }
 
     for dy in 0..dst_roi.height {
-        let sy_fp = (dy as u64) * scale_y;
+        let center_fp =
+            (((2 * (dy as i64) + 1) * src_rh_i64) << 15) / dst_rh_i64 - (1i64 << 15);
+        let sy_fp = center_fp.max(0) as u64;
         let sy0 = ((sy_fp >> 16) as u32).min(max_src_y);
         let sy1 = (sy0 + 1).min(max_src_y);
         let wy = ((sy_fp >> 8) & 0xFF) as u32;
@@ -281,23 +300,17 @@ pub fn resize_bilinear_roi_scalar(
         let dst_row_off = ((dst_roi.y + dy) * stride_dst + dst_roi.x * bpp as u32) as usize;
 
         if bpp == 4 {
-            for dx in 0..dst_roi.width {
-                let sx_fp = (dx as u64) * scale_x;
-                let sx0 = ((sx_fp >> 16) as u32).min(max_src_x);
-                let sx1 = (sx0 + 1).min(max_src_x);
-                let wx = ((sx_fp >> 8) & 0xFF) as u32;
-                let inv_wx = 256 - wx;
-
+            for (dx, &(x0_off, x1_off, wx, inv_wx)) in x_table.iter().enumerate() {
                 let w00 = inv_wx * inv_wy;
                 let w10 = wx * inv_wy;
                 let w01 = inv_wx * wy;
                 let w11 = wx * wy;
 
-                let p00 = row0_off + (sx0 as usize) * 4;
-                let p10 = row0_off + (sx1 as usize) * 4;
-                let p01 = row1_off + (sx0 as usize) * 4;
-                let p11 = row1_off + (sx1 as usize) * 4;
-                let out_px = dst_row_off + (dx as usize) * 4;
+                let p00 = row0_off + x0_off;
+                let p10 = row0_off + x1_off;
+                let p01 = row1_off + x0_off;
+                let p11 = row1_off + x1_off;
+                let out_px = dst_row_off + dx * 4;
 
                 dst[out_px + 0] = (((src[p00 + 0] as u32) * w00
                     + (src[p10 + 0] as u32) * w10
@@ -321,21 +334,15 @@ pub fn resize_bilinear_roi_scalar(
                     >> 16) as u8;
             }
         } else {
-            for dx in 0..dst_roi.width {
-                let sx_fp = (dx as u64) * scale_x;
-                let sx0 = ((sx_fp >> 16) as u32).min(max_src_x);
-                let sx1 = (sx0 + 1).min(max_src_x);
-                let wx = ((sx_fp >> 8) & 0xFF) as u32;
-                let inv_wx = 256 - wx;
-
-                let val = ((src[row0_off + sx0 as usize] as u32 * inv_wx
-                    + src[row0_off + sx1 as usize] as u32 * wx)
+            for (dx, &(x0_off, x1_off, wx, inv_wx)) in x_table.iter().enumerate() {
+                let val = ((src[row0_off + x0_off] as u32 * inv_wx
+                    + src[row0_off + x1_off] as u32 * wx)
                     * inv_wy
-                    + (src[row1_off + sx0 as usize] as u32 * inv_wx
-                        + src[row1_off + sx1 as usize] as u32 * wx)
+                    + (src[row1_off + x0_off] as u32 * inv_wx
+                        + src[row1_off + x1_off] as u32 * wx)
                         * wy)
                     >> 16;
-                dst[dst_row_off + dx as usize] = val as u8;
+                dst[dst_row_off + dx] = val as u8;
             }
         }
     }
@@ -591,7 +598,9 @@ mod tests {
             if std::arch::is_x86_feature_detected!("avx2") {
                 t.push(SimdTier::Avx2);
             }
-            if std::arch::is_x86_feature_detected!("avx512f") && std::arch::is_x86_feature_detected!("avx512bw") {
+            if std::arch::is_x86_feature_detected!("avx512f")
+                && std::arch::is_x86_feature_detected!("avx512bw")
+            {
                 t.push(SimdTier::Avx512);
             }
         }
@@ -600,14 +609,20 @@ mod tests {
 
     /// Runs `crop_scale_bgra` and turns a panic into a test failure that names the case.
     fn crop(
-        src: &[u8], (sw, sh, ss): (u32, u32, u32),
-        dst: &mut [u8], (dw, dh, ds): (u32, u32, u32),
-        strategy: CropStrategy, tier: SimdTier, case: &str,
+        src: &[u8],
+        (sw, sh, ss): (u32, u32, u32),
+        dst: &mut [u8],
+        (dw, dh, ds): (u32, u32, u32),
+        strategy: CropStrategy,
+        tier: SimdTier,
+        case: &str,
     ) -> bool {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             crop_scale_bgra(src, sw, sh, ss, dst, dw, dh, ds, 4, 3, strategy, tier)
         }))
-        .unwrap_or_else(|_| panic!("crop_scale_bgra panicked ({case}, {strategy:?}, {tier:?}) instead of returning false"))
+        .unwrap_or_else(|_| {
+            panic!("crop_scale_bgra panicked ({case}, {strategy:?}, {tier:?}) instead of returning false")
+        })
     }
 
     #[test]
@@ -619,12 +634,52 @@ mod tests {
             for tier in tiers() {
                 let mut dst = vec![0u8; (dw * 4 * dh) as usize];
                 // Source holds only 1920x1080 worth of rows of a bigger claimed frame (linux_app.rs case).
-                assert!(!crop(&src_ok[..(sw * 4 * 10) as usize], (sw, sh, sw * 4), &mut dst, (dw, dh, dw * 4), strategy, tier, "short src"));
-                assert!(!crop(&src_ok, (sw, sh, 0), &mut dst, (dw, dh, dw * 4), strategy, tier, "src stride 0"));
-                assert!(!crop(&src_ok, (sw, sh, sw * 4 - 4), &mut dst, (dw, dh, dw * 4), strategy, tier, "src stride < row"));
+                assert!(!crop(
+                    &src_ok[..(sw * 4 * 10) as usize],
+                    (sw, sh, sw * 4),
+                    &mut dst,
+                    (dw, dh, dw * 4),
+                    strategy,
+                    tier,
+                    "short src"
+                ));
+                assert!(!crop(
+                    &src_ok,
+                    (sw, sh, 0),
+                    &mut dst,
+                    (dw, dh, dw * 4),
+                    strategy,
+                    tier,
+                    "src stride 0"
+                ));
+                assert!(!crop(
+                    &src_ok,
+                    (sw, sh, sw * 4 - 4),
+                    &mut dst,
+                    (dw, dh, dw * 4),
+                    strategy,
+                    tier,
+                    "src stride < row"
+                ));
                 let mut short_dst = vec![0u8; (dw * 4 * dh) as usize - 1];
-                assert!(!crop(&src_ok, (sw, sh, sw * 4), &mut short_dst, (dw, dh, dw * 4), strategy, tier, "short dst"));
-                assert!(!crop(&src_ok, (sw, sh, sw * 4), &mut dst, (dw, dh, dw * 4 - 4), strategy, tier, "dst stride < row"));
+                assert!(!crop(
+                    &src_ok,
+                    (sw, sh, sw * 4),
+                    &mut short_dst,
+                    (dw, dh, dw * 4),
+                    strategy,
+                    tier,
+                    "short dst"
+                ));
+                assert!(!crop(
+                    &src_ok,
+                    (sw, sh, sw * 4),
+                    &mut dst,
+                    (dw, dh, dw * 4 - 4),
+                    strategy,
+                    tier,
+                    "dst stride < row"
+                ));
             }
         }
     }
@@ -633,11 +688,32 @@ mod tests {
     fn resize_rejects_short_gray8_buffers() {
         let src = vec![0u8; 16 * 16];
         let mut dst = vec![0u8; 8 * 8];
-        let full = |w, h| CropRect { x: 0, y: 0, width: w, height: h };
+        let full = |w, h| CropRect {
+            x: 0,
+            y: 0,
+            width: w,
+            height: h,
+        };
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            resize_bilinear_roi_scalar(&src[..100], 16, 16, 16, full(16, 16), &mut dst, 8, 8, 8, full(8, 8), 1)
+            resize_bilinear_roi_scalar(
+                &src[..100],
+                16,
+                16,
+                16,
+                full(16, 16),
+                &mut dst,
+                8,
+                8,
+                8,
+                full(8, 8),
+                1,
+            )
         }));
-        assert_eq!(r.ok(), Some(false), "short gray8 source must be rejected without a panic");
+        assert_eq!(
+            r.ok(),
+            Some(false),
+            "short gray8 source must be rejected without a panic"
+        );
     }
 
     #[test]
@@ -653,13 +729,52 @@ mod tests {
         }
         for tier in tiers() {
             let mut dst = vec![0u8; (w * 4 * h) as usize];
-            assert!(crop(&src, (w, h, ss), &mut dst, (w, h, w * 4), CropStrategy::CenterCrop, tier, "padded"));
+            assert!(crop(
+                &src,
+                (w, h, ss),
+                &mut dst,
+                (w, h, w * 4),
+                CropStrategy::CenterCrop,
+                tier,
+                "padded"
+            ));
             for y in 0..h as usize {
                 for x in 0..w as usize {
                     let p = (y * w as usize + x) * 4;
-                    assert_eq!(&dst[p..p + 4], &[x as u8, y as u8, 7, 255], "{tier:?} pixel ({x},{y})");
+                    assert_eq!(
+                        &dst[p..p + 4],
+                        &[x as u8, y as u8, 7, 255],
+                        "{tier:?} pixel ({x},{y})"
+                    );
                 }
             }
         }
+    }
+
+    #[test]
+    fn resize_bilinear_uses_half_pixel_center_alignment() {
+        // 4x1 gray8 row [10, 30, 100, 200] downscaled 2:1 to 2x1 must average (10,30)->20 and (100,200)->150
+        let src = [10u8, 30, 100, 200];
+        let mut dst = [0u8; 2];
+        let full = |w, h| CropRect {
+            x: 0,
+            y: 0,
+            width: w,
+            height: h,
+        };
+        assert!(resize_bilinear_roi_scalar(
+            &src,
+            4,
+            1,
+            4,
+            full(4, 1),
+            &mut dst,
+            2,
+            1,
+            2,
+            full(2, 1),
+            1
+        ));
+        assert_eq!(dst, [20, 150]);
     }
 }

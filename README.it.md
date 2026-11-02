@@ -17,18 +17,18 @@
 
 ---
 
-## ⬇️ Download e Installazione Immediata (v2.1.0)
+## ⬇️ Download e Installazione Immediata (v2.1.1)
 
-Scegli il pacchetto pronto all'uso per **Windows**, **macOS** o **Linux** dalla release ufficiale **SmartCam v2.1.0**:
+Scegli il pacchetto pronto all'uso per **Windows**, **macOS** o **Linux** dalla release ufficiale **SmartCam v2.1.1**:
 
 | Sistema Operativo | Tipo Pacchetto | Download Diretto (1-Click) | Note |
 | :--- | :--- | :--- | :--- |
-| **🪟 Windows 10 / 11 (64-bit)** | **Installer Ufficiale (`.exe`)** | [**Scarica SmartCam-Setup-v2.1.0-x64.exe**](https://github.com/RubensRainelli/SmartCam/releases/download/v2.1.0/SmartCam-Setup-v2.1.0-x64.exe) | **Consigliato per Windows.** Configura automaticamente la Webcam Virtuale e le icone nel Menu Start. |
-| **🪟 Windows 10 / 11 (64-bit)** | **Versione Portatile (`.zip`)** | [**Scarica SmartCam-v2.1.0-windows-x64-portable.zip**](https://github.com/RubensRainelli/SmartCam/releases/download/v2.1.0/SmartCam-v2.1.0-windows-x64-portable.zip) | Nessuna installazione richiesta. Estrai la cartella e avvia `SmartCam.exe`. |
-| **🍎 macOS (Apple Silicon & Intel)** | **Immagine Disco Universale (`.dmg`)** | [**Scarica SmartCam-v2.1.0-macos-universal.dmg**](https://github.com/RubensRainelli/SmartCam/releases/download/v2.1.0/SmartCam-v2.1.0-macos-universal.dmg) | **Consigliato per Mac.** App Universale per Mac M1/M2/M3/M4 e Intel. Trascina `SmartCam.app` in Applicazioni. |
-| **🐧 Linux (Tutte le Distro x64)** | **AppImage Portatile (`.AppImage`)** | [**Scarica SmartCam-v2.1.0-x86_64.AppImage**](https://github.com/RubensRainelli/SmartCam/releases/download/v2.1.0/SmartCam-v2.1.0-x86_64.AppImage) | **Consigliato per Linux.** Un unico file autonomo: rendilo eseguibile (`chmod +x`) e avvialo su qualsiasi distribuzione. |
-| **🐧 Linux (Ubuntu / Debian / Mint)** | **Pacchetto Debian (`.deb`)** | [**Scarica smartcam_2.1.0_amd64.deb**](https://github.com/RubensRainelli/SmartCam/releases/download/v2.1.0/smartcam_2.1.0_amd64.deb) | Pacchetto nativo per Debian, Ubuntu, Linux Mint e Pop!_OS (`sudo apt install ./smartcam_2.1.0_amd64.deb`). |
-| **🐧 Linux (Tutte le Distro x64)** | **Archivio Portatile (`.tar.gz`)** | [**Scarica SmartCam-v2.1.0-linux-x86_64.tar.gz**](https://github.com/RubensRainelli/SmartCam/releases/download/v2.1.0/SmartCam-v2.1.0-linux-x86_64.tar.gz) | Archivio binario universale per Arch, Fedora, openSUSE e qualsiasi sistema Linux x86_64. |
+| **🪟 Windows 10 / 11 (64-bit)** | **Installer Ufficiale (`.exe`)** | [**Scarica SmartCam-Setup-v2.1.1-x64.exe**](https://github.com/RubensRainelli/SmartCam/releases/download/v2.1.1/SmartCam-Setup-v2.1.1-x64.exe) | **Consigliato per Windows.** Configura automaticamente la Webcam Virtuale e le icone nel Menu Start. |
+| **🪟 Windows 10 / 11 (64-bit)** | **Versione Portatile (`.zip`)** | [**Scarica SmartCam-v2.1.1-windows-x64-portable.zip**](https://github.com/RubensRainelli/SmartCam/releases/download/v2.1.1/SmartCam-v2.1.1-windows-x64-portable.zip) | Nessuna installazione richiesta. Estrai la cartella e avvia `SmartCam.exe`. |
+| **🍎 macOS (Apple Silicon & Intel)** | **Immagine Disco Universale (`.dmg`)** | [**Scarica SmartCam-v2.1.1-macos-universal.dmg**](https://github.com/RubensRainelli/SmartCam/releases/download/v2.1.1/SmartCam-v2.1.1-macos-universal.dmg) | **Consigliato per Mac.** App Universale per Mac M1/M2/M3/M4 e Intel. Trascina `SmartCam.app` in Applicazioni. |
+| **🐧 Linux (Tutte le Distro x64)** | **AppImage Portatile (`.AppImage`)** | [**Scarica SmartCam-v2.1.1-x86_64.AppImage**](https://github.com/RubensRainelli/SmartCam/releases/download/v2.1.1/SmartCam-v2.1.1-x86_64.AppImage) | **Consigliato per Linux.** Un unico file autonomo: rendilo eseguibile (`chmod +x`) e avvialo su qualsiasi distribuzione. |
+| **🐧 Linux (Ubuntu / Debian / Mint)** | **Pacchetto Debian (`.deb`)** | [**Scarica smartcam_2.1.1_amd64.deb**](https://github.com/RubensRainelli/SmartCam/releases/download/v2.1.1/smartcam_2.1.1_amd64.deb) | Pacchetto nativo per Debian, Ubuntu, Linux Mint e Pop!_OS (`sudo apt install ./smartcam_2.1.1_amd64.deb`). |
+| **🐧 Linux (Tutte le Distro x64)** | **Archivio Portatile (`.tar.gz`)** | [**Scarica SmartCam-v2.1.1-linux-x86_64.tar.gz**](https://github.com/RubensRainelli/SmartCam/releases/download/v2.1.1/SmartCam-v2.1.1-linux-x86_64.tar.gz) | Archivio binario universale per Arch, Fedora, openSUSE e qualsiasi sistema Linux x86_64. |
 
 ### ⚡ Installazione Rapida da Terminale (Windows, Linux e macOS)
 
@@ -38,11 +38,11 @@ Scegli il pacchetto pronto all'uso per **Windows**, **macOS** o **Linux** dalla 
   ```
 * **🐧 Linux (AppImage — funziona su qualsiasi distribuzione):**
   ```bash
-  chmod +x SmartCam-v2.1.0-x86_64.AppImage && ./SmartCam-v2.1.0-x86_64.AppImage
+  chmod +x SmartCam-v2.1.1-x86_64.AppImage && ./SmartCam-v2.1.1-x86_64.AppImage
   ```
 * **🐧 Ubuntu / Debian / Linux Mint (`.deb`):**
   ```bash
-  sudo apt install ./smartcam_2.1.0_amd64.deb
+  sudo apt install ./smartcam_2.1.1_amd64.deb
   ```
 
 ---
@@ -60,9 +60,9 @@ Scegli il pacchetto pronto all'uso per **Windows**, **macOS** o **Linux** dalla 
 ## 🚀 Guida Rapida in 3 Passi
 
 1. **Avvia SmartCam sul tuo computer:**
-   * **Windows:** Esegui `SmartCam-Setup-v2.1.0-x64.exe` e apri **SmartCam** dal Menu Start.
-   * **macOS:** Apri `SmartCam-v2.1.0-macos-universal.dmg`, trascina **SmartCam** nella cartella Applicazioni e avviala.
-   * **Linux:** Avvia `SmartCam-v2.1.0-x86_64.AppImage` (oppure lancia `smartcam` dopo aver installato il pacchetto `.deb`).
+   * **Windows:** Esegui `SmartCam-Setup-v2.1.1-x64.exe` e apri **SmartCam** dal Menu Start.
+   * **macOS:** Apri `SmartCam-v2.1.1-macos-universal.dmg`, trascina **SmartCam** nella cartella Applicazioni e avviala.
+   * **Linux:** Avvia `SmartCam-v2.1.1-x86_64.AppImage` (oppure lancia `smartcam` dopo aver installato il pacchetto `.deb`).
 2. **Scegli l'effetto sfondo o collega il telefono:** Seleziona l'effetto che preferisci (**Sfocatura**, **Immagine Studio** o **Colore Solido**), scegli il formato (`16:9`, `4:3`, `1:1` o `9:16`), oppure clicca su **Smartphone Wi-Fi** per inquadrare il QR Code col cellulare.
 3. **Seleziona "SmartCam" nella tua app di videochiamata:** Apri **Zoom, Microsoft Teams, Google Meet, Discord o OBS Studio**, entra nelle impostazioni video e scegli **SmartCam** come fotocamera.
 
@@ -70,16 +70,16 @@ Scegli il pacchetto pronto all'uso per **Windows**, **macOS** o **Linux** dalla 
 
 ## ❓ Domande Frequenti (FAQ) e Compatibilità
 
-### Quali sistemi operativi e programmi sono supportati in SmartCam v2.0?
+### Quali sistemi operativi e programmi sono supportati in SmartCam v2.0+?
 * **🐧 Linux:** Supporta qualsiasi distribuzione Linux a 64-bit tramite l'**AppImage** universale, il pacchetto `.deb` per Debian/Ubuntu/Mint o l'archivio portatile `.tar.gz` (integrandosi automaticamente con le webcam standard V4L2 e la fotocamera virtuale `v4l2loopback`).
 * **🍎 macOS:** Binario Universale nativo compatibile sia con **Apple Silicon (M1 / M2 / M3 / M4)** sia con Mac **Intel** (macOS 11 Big Sur o successivi).
 * **🪟 Windows:** Progettata per **Windows 10 e Windows 11 moderni (64-bit)** tramite la piattaforma nativa Windows Media Foundation per compatibilità immediata con Teams, Zoom, Meet, Discord, OBS e browser.
   > *Usi un vecchio programma su Windows che richiede DirectShow?* Il supporto per i vecchi programmi basati esclusivamente su DirectShow è stato ritirato nella v2.0 per mantenere l'app leggera e moderna. Puoi scaricare in qualsiasi momento **[SmartCam v1.x dalla pagina Releases](https://github.com/RubensRainelli/SmartCam/releases)**.
 
 ### Come posso verificare l'integrità del file scaricato?
-Ogni release ufficiale include il file [`SHA256SUMS.txt`](https://github.com/RubensRainelli/SmartCam/releases/download/v2.1.0/SHA256SUMS.txt) con le impronte crittografiche SHA-256 di tutti i pacchetti:
+Ogni release ufficiale include il file [`SHA256SUMS.txt`](https://github.com/RubensRainelli/SmartCam/releases/download/v2.1.1/SHA256SUMS.txt) con le impronte crittografiche SHA-256 di tutti i pacchetti:
 * **Linux / macOS:** `sha256sum -c SHA256SUMS.txt --ignore-missing` (oppure `shasum -a 256 -c SHA256SUMS.txt`)
-* **Windows (PowerShell):** `Get-FileHash .\SmartCam-Setup-v2.1.0-x64.exe -Algorithm SHA256`
+* **Windows (PowerShell):** `Get-FileHash .\SmartCam-Setup-v2.1.1-x64.exe -Algorithm SHA256`
 
 ---
 
@@ -88,6 +88,16 @@ Ogni release ufficiale include il file [`SHA256SUMS.txt`](https://github.com/Rub
 * **🖥️ Portale Web Interattivo e Testbench Webcam Live:** [**rubensrainelli.github.io/SmartCam**](https://rubensrainelli.github.io/SmartCam/)
 * **🚀 Scopri tutti gli altri progetti di Rubens Rainelli:** Vuoi scoprire chi c'è dietro SmartCam e quali altri software ho realizzato? Visita la pagina dedicata ai miei progetti su [**rubensrainelli.github.io/rubens-rainelli-projects**](https://rubensrainelli.github.io/rubens-rainelli-projects/rubensrainelli-projects.html)
 * **🛠️ Per Sviluppatori:** Sei uno sviluppatore o vuoi scoprire come funziona il motore 100% Rust puro di SmartCam? Leggi la **[Guida all'Architettura Tecnica e Ingegneristica (`docs/ARCHITECTURE.md`)](docs/ARCHITECTURE.md)** *(in inglese)*.
+
+---
+
+## 🤝 Ringraziamenti e Contributori
+
+Un ringraziamento speciale a chi contribuisce a rendere SmartCam sempre più sicura, stabile e affidabile su tutte le piattaforme:
+
+* **[@maksimtech](https://github.com/maksimtech)** — **Debugger & Security / Quality Contributor**: Un sentito ringraziamento per l'eccellente attività di debugging approfondito, le verifiche di sicurezza della memoria sui kernel SIMD, motore video e IPC, le correzioni al ciclo di vita degli oggetti COM Media Foundation e alla colorimetria NV12, il consolidamento del parser di configurazione, la segnalazione responsabile sulla privacy IPC in ambienti condivisi/scolastici e il perfezionamento della suite di test multipiattaforma.
+
+---
 
 ### 📜 Licenza d'Uso (PEFL v1.0)
 

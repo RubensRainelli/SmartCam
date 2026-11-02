@@ -67,8 +67,11 @@ impl MfVirtualCameraSink {
     }
 
     fn sync_staged_mf_source_dll() {
-        let public_dir = std::path::PathBuf::from(r"C:\Users\Public\SmartCam");
-        let public_dll = public_dir.join("smartcam_mf_source.dll");
+        let _ = std::fs::remove_dir_all(r"C:\Users\Public\SmartCam");
+        let prog_data =
+            std::env::var("PROGRAMDATA").unwrap_or_else(|_| r"C:\ProgramData".to_string());
+        let staged_dir = std::path::PathBuf::from(prog_data).join("SmartCam");
+        let staged_dll = staged_dir.join("smartcam_mf_source.dll");
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
                 let release_candidate = dir
@@ -83,22 +86,21 @@ impl MfVirtualCameraSink {
                         .map(|p| p.join("smartcam_mf_source.dll"))
                         .unwrap_or_default(),
                 ];
-                for src in candidates.iter().filter(|p| p.is_file() && *p != &public_dll) {
-                    let _ = std::fs::create_dir_all(&public_dir);
-                    let already_identical = match (std::fs::read(src), std::fs::read(&public_dll)) {
+                if let Some(src) = candidates.iter().find(|p| p.is_file() && *p != &staged_dll) {
+                    let _ = std::fs::create_dir_all(&staged_dir);
+                    let already_identical = match (std::fs::read(src), std::fs::read(&staged_dll)) {
                         (Ok(a), Ok(b)) => a == b,
                         _ => false,
                     };
-                    if already_identical {
-                        break;
+                    if !already_identical {
+                        let old_dll = staged_dir.join("smartcam_mf_source.dll.old");
+                        let _ = std::fs::remove_file(&old_dll);
+                        if staged_dll.exists() {
+                            let _ = std::fs::rename(&staged_dll, &old_dll);
+                        }
+                        let _ = std::fs::copy(src, &staged_dll);
+                        let _ = std::fs::remove_file(&old_dll);
                     }
-                    let old_dll = public_dir.join("smartcam_mf_source.dll.old");
-                    let _ = std::fs::remove_file(&old_dll);
-                    if public_dll.exists() {
-                        let _ = std::fs::rename(&public_dll, &old_dll);
-                    }
-                    let _ = std::fs::copy(src, &public_dll);
-                    break;
                 }
             }
         }

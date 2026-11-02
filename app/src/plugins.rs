@@ -2680,7 +2680,7 @@ pub fn builtin_plugins() -> Vec<PluginMetadata> {
         PluginMetadata {
             id: PLUGIN_ID_PHONE_CAMERA.to_string(),
             name: "📱 Fotocamera Smartphone (Wi-Fi / USB / IP Cam)".to_string(),
-            version: "2.1.0".to_string(),
+            version: "2.1.1".to_string(),
             author: "Rubens Rainelli".to_string(),
             description: "Server HTTP integrato + client MJPEG con porta configurabile e sblocco Firewall: apri l'URL mostrato a schermo sul browser del telefono per trasmettere la fotocamera live.".to_string(),
             category: PluginCategory::CameraInput,

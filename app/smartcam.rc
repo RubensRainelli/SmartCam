@@ -18,8 +18,8 @@
 103 ICON "../assets/icons/smartcam_neon_iris.ico"
 
 1 VERSIONINFO
-FILEVERSION 2,1,0,0
-PRODUCTVERSION 2,1,0,0
+FILEVERSION 2,1,1,0
+PRODUCTVERSION 2,1,1,0
 FILEFLAGSMASK 0x3fL
 FILEFLAGS 0x0L
 FILEOS 0x40004L
@@ -32,12 +32,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Rubens Rainelli\0"
             VALUE "FileDescription", "SmartCam\0"
-            VALUE "FileVersion", "2.1.0.0\0"
+            VALUE "FileVersion", "2.1.1.0\0"
             VALUE "InternalName", "SmartCam.exe\0"
             VALUE "LegalCopyright", "Copyright (c) 2026 Rubens Rainelli (PEFL v1.0)\0"
             VALUE "OriginalFilename", "SmartCam.exe\0"
             VALUE "ProductName", "SmartCam\0"
-            VALUE "ProductVersion", "2.1.0.0\0"
+            VALUE "ProductVersion", "2.1.1.0\0"
         END
     END
     BLOCK "VarFileInfo"

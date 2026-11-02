@@ -145,6 +145,12 @@ mod tests {
     #[test]
     fn test_dll_get_class_object_and_com_interfaces() {
         unsafe {
+            let pid = std::process::id();
+            smartcam_capture::ipc::set_default_ipc_names_for_test(Some((
+                format!(r"Local\SmartCam_MfComTest_{pid}"),
+                format!(r"Local\SmartCam_MfComEv_{pid}"),
+            )));
+
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
             let _ = MFStartup(MF_VERSION, 0);
 
@@ -286,6 +292,12 @@ mod tests {
         }
 
         unsafe {
+            let pid = std::process::id();
+            smartcam_capture::ipc::set_default_ipc_names_for_test(Some((
+                format!(r"Local\SmartCam_MfComTest_{pid}"),
+                format!(r"Local\SmartCam_MfComEv_{pid}"),
+            )));
+
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
             let _ = MFStartup(MF_VERSION, 0);
 

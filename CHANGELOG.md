@@ -2,6 +2,33 @@
 
 All notable changes to **SmartCam** are documented in this file.
 
+## [2.1.1] — 2026-11-02
+
+### 🛡️ Security, Memory-Safety, Media Foundation COM & Linux V4L2 Hardening Release
+
+Special thanks to **[@maksimtech](https://github.com/maksimtech)** (**Debugger & Security / Quality Contributor**) for contributing PRs #16–#24 and reporting the multi-user IPC privacy and cross-platform findings addressed in this release:
+
+* **Multi-User IPC Privacy & Security Hardening (`crates/smartcam-capture/src/ipc.rs`, `app/src/pefl_guard.rs`, `app/src/diagnostics.rs`)**:
+  * **Explicit Protected SDDL DACL**: Replaced the permissive null DACL on the cross-session IPC backing file, named file mapping, and frame event with a Protected DACL (`D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;LS)(A;;GA;;;<UserSid>)`) that restricts access exclusively to `SYSTEM`, `Administrators`, `LOCAL SERVICE` (Windows Camera `FrameServer` in Session 0), and the active interactive user's SID, blocking other local accounts on shared/school PCs from reading or injecting frames.
+  * **Payload Zeroing & Automatic Unlink on Close**: When the producer closes or drops, the entire shared memory header and 33 MB pixel payload are zeroed out in memory before unmapping, and the backing file (now stored under `%PROGRAMDATA%\SmartCam`) is immediately unlinked from disk.
+  * **Per-User PEFL Persistence & Clean Test Suite Isolation**: Removed `C:\Users\Public\SmartCam` from PEFL acceptance caching so license consent is strictly per-user, and isolated all `cargo test --workspace` runs so zero files or registry keys are left behind on developer/contributor machines (`PR #24`).
+* **Engine SIMD, Segmenter & IPC Buffer Bounds Validation (`crates/smartcam-engine`, `crates/smartcam-capture`)**:
+  * **`blend_bgra` SIMD Pre-Validation (`PR #16`)**: Validates buffer lengths and row strides across all planes before dispatching to `AVX-512`, `AVX2`, `NEON`, or `Scalar` kernels.
+  * **`crop_scale_bgra` & `resize_bilinear_roi` Bounds & Half-Pixel Center Alignment (`PR #17`)**: Rejects undersized buffers or narrow strides with `false` instead of panicking, and aligns 16.16 fixed-point bilinear resampling to pixel centers (`(d + 0.5) * src / dst - 0.5`).
+  * **`compute_mask` & `calibrate_face_landmarks` Input Checks (`PR #18`)**: Rejects strides narrower than a full row in both `GreenScreenSegmenter` and `AiOnnxSegmenter`, and safely handles snapshots smaller than the 5×5 landmark sampling window.
+  * **`SharedFrameIpc::write_frame` Source Stride Validation (`PR #19`)**: Rejects source strides that are narrower than a row or would read past `src_data`.
+* **Windows Media Foundation Virtual Camera COM & NV12 Colorimetry Fixes (`crates/smartcam-mf-source`)**:
+  * **COM Object Lifetime Tracking in `DllCanUnloadNow` (`PR #20`)**: Tracks active `SmartCamClassFactory`, `SmartCamMfMediaSource`, and `SmartCamMfMediaStream` instances via an atomic `ModuleRef` guard so `CoFreeUnusedLibraries` never unloads `smartcam_mf_source.dll` while COM objects are alive.
+  * **Accurate BT.601 Studio-Range NV12 Media Type Attributes (`PR #21`)**: Advertises `MFVideoTransferMatrix_BT601` and `MFNominalRange_16_235` on NV12 media types to match the exact encoding produced by `bgra_to_nv12_pitched`.
+* **Desktop App Config & Network Stream Hardening (`app/src/config.rs`, `app/src/plugins.rs`, `app/src/main.rs`)**:
+  * **Overflow-Safe MJPEG `Content-Length` Parsing (`PR #22`)**: Uses `checked_add` when parsing multipart `Content-Length` headers from HTTP/MJPEG camera streams.
+  * **Finite Float Filtering & Backslash Preservation in YAML Config (`PR #23`)**: Rejects `NaN`/`inf` float values on config load and CLI arguments (`--set-bg-tolerance`), and escapes backslashes across all quoted string fields on save so Windows device IDs and UNC paths survive repeated save/load cycles.
+* **Linux Native V4L2 Capture & Pipeline Completion (`crates/smartcam-capture/src/linux_backend/mod.rs`, `app/src/linux_app.rs`)**:
+  * Implemented full Linux V4L2 format negotiation (`VIDIOC_S_FMT` / `VIDIOC_G_FMT`), zero-copy kernel `V4L2_MEMORY_MMAP` ring-buffer streaming (`VIDIOC_REQBUFS`, `VIDIOC_QUERYBUF`, `mmap`, `VIDIOC_QBUF`, `VIDIOC_STREAMON`, `VIDIOC_DQBUF`) with `read()` fallback, and `YUYV` / `RGB24` / `BGR24` / `BGR32` to `BGRA32` decoding.
+  * Added `VIDIOC_S_FMT` output format configuration on `v4l2loopback` virtual camera sinks, dynamic `raw_buf` resizing for `>1080p` cameras, and PEFL v1.0 Clause 3 startup verification in `linux_app.rs`.
+
+---
+
 ## [2.1.0] — 2026-11-01
 
 ### ⚡ Feature & Performance Release: Desktop Zero-Copy Pipeline, Mobile Native Lens Detection & Power Optimization

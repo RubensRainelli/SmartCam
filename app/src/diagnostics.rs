@@ -373,13 +373,19 @@ fn copy_dll_safely_if_changed(src_dll: &Path, dst_dll: &Path) -> bool {
     if dst_dll.exists() {
         let _ = std::fs::rename(dst_dll, &old_dll);
     }
-    std::fs::copy(src_dll, dst_dll).is_ok()
+    let ok = std::fs::copy(src_dll, dst_dll).is_ok();
+    let _ = std::fs::remove_file(&old_dll);
+    ok
 }
 
-fn stage_mf_source_dll_to_public(src_dll: &Path) -> PathBuf {
-    let public_dir = PathBuf::from(r"C:\Users\Public\SmartCam");
-    let _ = std::fs::create_dir_all(&public_dir);
-    let public_dll = public_dir.join("smartcam_mf_source.dll");
+fn stage_mf_source_dll_to_programdata(src_dll: &Path) -> PathBuf {
+    let _ = std::fs::remove_dir_all(r"C:\Users\Public\SmartCam");
+    let _ = std::fs::remove_file(r"C:\Users\Public\SmartCam_MF_SharedFrame_v1.ipc");
+
+    let prog_data = std::env::var("PROGRAMDATA").unwrap_or_else(|_| r"C:\ProgramData".to_string());
+    let staged_dir = PathBuf::from(prog_data).join("SmartCam");
+    let _ = std::fs::create_dir_all(&staged_dir);
+    let staged_dll = staged_dir.join("smartcam_mf_source.dll");
 
     // Also try updating C:\Program Files\SmartCam\smartcam_mf_source.dll if writable
     let prog_dll = PathBuf::from(r"C:\Program Files\SmartCam\smartcam_mf_source.dll");
@@ -387,8 +393,8 @@ fn stage_mf_source_dll_to_public(src_dll: &Path) -> PathBuf {
         let _ = copy_dll_safely_if_changed(src_dll, &prog_dll);
     }
 
-    if copy_dll_safely_if_changed(src_dll, &public_dll) || public_dll.is_file() {
-        public_dll
+    if copy_dll_safely_if_changed(src_dll, &staged_dll) || staged_dll.is_file() {
+        staged_dll
     } else {
         src_dll.to_path_buf()
     }
@@ -642,7 +648,7 @@ pub fn ensure_virtual_camera_registered(
     }
 
     let raw_dll_path = chosen_dll?;
-    let dll_path = stage_mf_source_dll_to_public(&raw_dll_path);
+    let dll_path = stage_mf_source_dll_to_programdata(&raw_dll_path);
     let dll_str = dll_path.to_string_lossy().to_string();
 
     // Register in HKCU (works immediately without UAC) and HKLM if elevated

@@ -27,7 +27,6 @@ mod diagnostics;
 mod engine_bridge;
 #[cfg(target_os = "windows")]
 mod gui;
-#[cfg(target_os = "windows")]
 mod pefl_guard;
 #[cfg(target_os = "windows")]
 mod plugins;
@@ -210,7 +209,7 @@ fn main() {
             }
             "--set-bg-tolerance" | "--bg-tolerance" if i + 1 < args.len() => {
                 i += 1;
-                set_bg_tol = args[i].parse().ok();
+                set_bg_tol = args[i].parse::<f32>().ok().filter(|v| v.is_finite());
             }
             "--set-mode" | "--mode" if i + 1 < args.len() => {
                 i += 1;
