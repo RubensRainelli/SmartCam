@@ -423,6 +423,12 @@ impl SharedFrameIpc {
         {
             return false;
         }
+        // Rows are read from `y * src_stride` through raw pointers: the stride must cover a row
+        // and `src_data` must reach the end of the last row (which needs no padding).
+        let src_stride = src_stride as usize;
+        if src_stride < dst_stride || src_data.len() < (height as usize - 1) * src_stride + dst_stride {
+            return false;
+        }
 
         unsafe {
             let hdr = &*(self.mapped_view as *const SharedFrameHeader);
@@ -441,11 +447,11 @@ impl SharedFrameIpc {
 
             let dst_payload = self.mapped_view.add(SHARED_FRAME_HEADER_BYTES);
 
-            if src_stride as usize == dst_stride {
+            if src_stride == dst_stride {
                 std::ptr::copy_nonoverlapping(src_data.as_ptr(), dst_payload, frame_bytes);
             } else {
                 for y in 0..height as usize {
-                    let src_row = src_data.as_ptr().add(y * src_stride as usize);
+                    let src_row = src_data.as_ptr().add(y * src_stride);
                     let dst_row = dst_payload.add(y * dst_stride);
                     std::ptr::copy_nonoverlapping(src_row, dst_row, dst_stride);
                 }
@@ -611,5 +617,63 @@ impl SharedFrameIpc {
 impl Drop for SharedFrameIpc {
     fn drop(&mut self) {
         self.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn producer(tag: &str) -> SharedFrameIpc {
+        let pid = std::process::id();
+        SharedFrameIpc::open_or_create(
+            &format!(r"Local\SmartCam_TestIpcStride_{tag}_{pid}"),
+            &format!(r"Local\SmartCam_TestIpcStrideEv_{tag}_{pid}"),
+            true,
+        )
+        .expect("open producer")
+    }
+
+    #[test]
+    fn write_frame_rejects_a_stride_that_reads_past_the_source() {
+        let ipc = producer("past");
+        // 2x2 frame: 16 tightly packed bytes, but stride 4096 puts row 1 at offset 4096.
+        assert!(!ipc.write_frame(&[7u8; 16], 2, 2, 4096, 30, 1, 0, 0));
+        // One byte short of the last row of a padded frame.
+        let (w, h, stride) = (3u32, 4u32, 3 * 4 + 8);
+        let needed = ((h - 1) * stride + w * 4) as usize;
+        assert!(!ipc.write_frame(&vec![1u8; needed - 1], w, h, stride, 30, 1, 0, 0));
+    }
+
+    #[test]
+    fn write_frame_rejects_a_stride_narrower_than_a_row() {
+        let ipc = producer("narrow");
+        let src = vec![1u8; 4096];
+        assert!(!ipc.write_frame(&src, 2, 2, 0, 30, 1, 0, 0), "stride 0");
+        assert!(!ipc.write_frame(&src, 2, 2, 4, 30, 1, 0, 0), "stride 4 for an 8-byte row");
+    }
+
+    #[test]
+    fn write_frame_copies_a_padded_source_row_by_row() {
+        let ipc = producer("padded");
+        let (w, h, stride) = (3u32, 4u32, 3 * 4 + 8);
+        // The last row does not need its padding.
+        let mut src = vec![0xEEu8; ((h - 1) * stride + w * 4) as usize];
+        for y in 0..h as usize {
+            for x in 0..(w * 4) as usize {
+                src[y * stride as usize + x] = (y * 16 + x) as u8;
+            }
+        }
+        assert!(ipc.write_frame(&src, w, h, stride, 30, 1, 0, 0));
+
+        let mut out = vec![0u8; (w * 4 * h) as usize];
+        let (mut rw, mut rh, mut ts) = (0u32, 0u32, 0u64);
+        assert!(ipc.read_frame(&mut out, &mut rw, &mut rh, &mut ts));
+        assert_eq!((rw, rh), (w, h));
+        for y in 0..h as usize {
+            let row = &out[y * (w * 4) as usize..(y + 1) * (w * 4) as usize];
+            let expected: Vec<u8> = (0..(w * 4) as usize).map(|x| (y * 16 + x) as u8).collect();
+            assert_eq!(row, &expected[..], "row {y}");
+        }
     }
 }
