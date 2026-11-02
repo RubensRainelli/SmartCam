@@ -223,7 +223,13 @@ impl AiOnnxSegmenter {
         let mut sum_cr = 0.0f32;
         let mut count = 0.0f32;
 
+        // The 5x5 sampling window needs a snapshot of at least 5x5 pixels; a smaller one keeps
+        // the default skin tone below (the `clamp(2, width - 3)` bounds would also be inverted).
+        let window_fits = width >= 5 && height >= 5;
         for (sx_norm, sy_norm) in sample_centers {
+            if !window_fits {
+                break;
+            }
             let px_c = ((sx_norm * (width as f32)).round() as i32)
                 .clamp(2, (width as i32).saturating_sub(3));
             let py_c = ((sy_norm * (height as f32)).round() as i32)
@@ -366,6 +372,8 @@ impl AiOnnxSegmenter {
             || h == 0
             || input_frame.len() < (stride_in as usize) * h
             || out_mask.len() < (stride_out as usize) * h
+            || (stride_in as usize) < w * 4
+            || (stride_out as usize) < w
         {
             return false;
         }
@@ -659,5 +667,55 @@ impl AiOnnxSegmenter {
         }
 
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn no_panic<T>(case: &str, f: impl FnOnce() -> T) -> T {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+            .unwrap_or_else(|_| panic!("{case}: panicked"))
+    }
+
+    #[test]
+    fn calibrate_face_landmarks_handles_snapshots_smaller_than_the_sampling_window() {
+        let pts = [(0.4, 0.4), (0.6, 0.4), (0.5, 0.5), (0.5, 0.6), (0.5, 0.7)];
+        for (w, h) in [(1u32, 1u32), (4, 4), (4, 64), (64, 4), (0, 0)] {
+            let snapshot = vec![128u8; (w * h * 4) as usize];
+            let mut seg = AiOnnxSegmenter::new(AiSegmenterConfig::default());
+            let (cb, cr, _, _) = no_panic(&format!("{w}x{h} snapshot"), || seg.calibrate_face_landmarks(&snapshot, w, h, pts));
+            // Too small to sample: the default skin tone is kept, as when no pixel is readable.
+            assert_eq!((cb, cr), (113.0, 148.0), "{w}x{h}");
+        }
+    }
+
+    #[test]
+    fn calibrate_face_landmarks_still_samples_a_5x5_snapshot() {
+        // Uniform warm skin-like color: Cb/Cr must come from the pixels, not the defaults.
+        let (b, g, r) = (120u8, 150u8, 210u8);
+        let snapshot: Vec<u8> = (0..5 * 5).flat_map(|_| [b, g, r, 255]).collect();
+        let mut seg = AiOnnxSegmenter::new(AiSegmenterConfig::default());
+        let pts = [(0.4, 0.4), (0.6, 0.4), (0.5, 0.5), (0.5, 0.6), (0.5, 0.7)];
+        let (cb, cr, _, _) = seg.calibrate_face_landmarks(&snapshot, 5, 5, pts);
+        let exp_cb = 128.0 - 0.168736 * r as f32 - 0.331264 * g as f32 + 0.5 * b as f32;
+        let exp_cr = 128.0 + 0.5 * r as f32 - 0.418688 * g as f32 - 0.081312 * b as f32;
+        assert!((cb - exp_cb).abs() < 0.01 && (cr - exp_cr).abs() < 0.01, "({cb}, {cr}) vs ({exp_cb}, {exp_cr})");
+    }
+
+    #[test]
+    fn ai_compute_mask_rejects_strides_narrower_than_a_row() {
+        let (w, h) = (4u32, 4u32);
+        let frame = vec![0u8; 64];
+        let mut mask = vec![0u8; 64];
+        for ai_enabled in [true, false] {
+            let mut seg = AiOnnxSegmenter::new(AiSegmenterConfig::default());
+            // A pixel stride (4) passed where a byte stride (16) is expected.
+            let ok = no_panic("input stride 4", || seg.compute_mask(&frame, w, h, 4, &mut mask, w, true, ai_enabled));
+            assert!(!ok, "ai_enabled={ai_enabled}: input stride narrower than a row was accepted");
+            let ok = no_panic("mask stride 2", || seg.compute_mask(&frame, w, h, w * 4, &mut mask, 2, true, ai_enabled));
+            assert!(!ok, "ai_enabled={ai_enabled}: mask stride narrower than a row was accepted");
+        }
     }
 }
