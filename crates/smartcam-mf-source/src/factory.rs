@@ -27,18 +27,48 @@ use crate::{constants::trace_mf, source::SmartCamMfMediaSource};
 
 pub static SERVER_LOCKS: AtomicI32 = AtomicI32::new(0);
 
+/// Live COM objects of this DLL (class factories, media sources, media streams).
+pub static LIVE_OBJECTS: AtomicI32 = AtomicI32::new(0);
+
+/// Held by every COM object of this DLL so that `DllCanUnloadNow` keeps the DLL loaded while
+/// any of them is alive (windows-rs `#[implement]` objects do not count module references).
+pub struct ModuleRef(());
+
+impl ModuleRef {
+    pub fn new() -> Self {
+        LIVE_OBJECTS.fetch_add(1, Ordering::SeqCst);
+        Self(())
+    }
+}
+
+impl Default for ModuleRef {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for ModuleRef {
+    fn drop(&mut self) {
+        LIVE_OBJECTS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 #[implement(IClassFactory)]
-pub struct SmartCamClassFactory;
+pub struct SmartCamClassFactory {
+    _module: ModuleRef,
+}
 
 impl Default for SmartCamClassFactory {
     fn default() -> Self {
-        Self
+        Self::new()
     }
 }
 
 impl SmartCamClassFactory {
     pub fn new() -> Self {
-        Self
+        Self {
+            _module: ModuleRef::new(),
+        }
     }
 }
 
