@@ -56,6 +56,7 @@ use crate::{
         DEFAULT_STREAM_HEIGHT, DEFAULT_STREAM_WIDTH, HR_ERROR_SET_NOT_FOUND, PINNAME_VIDEO_CAPTURE,
     },
     stream::SmartCamMfMediaStream,
+    factory::ModuleRef,
 };
 
 // KSCAMERAPROFILE_Legacy {B4794D77-2B21-4090-B02B-707D6A0E035C}
@@ -122,6 +123,8 @@ struct SourceInner {
     stream_com: Option<IMFMediaStream>,
     stream_started_once: bool,
     is_shutdown: bool,
+    /// Keeps the DLL loaded while this object is alive (see `DllCanUnloadNow`).
+    _module: ModuleRef,
 }
 
 #[derive(Clone)]
@@ -237,6 +240,7 @@ impl SmartCamMfMediaSource {
             stream_com: Some(stream_com),
             stream_started_once: false,
             is_shutdown: false,
+            _module: ModuleRef::new(),
         };
 
         let source_obj = Self {

@@ -50,6 +50,7 @@ use crate::constants::{
     trace_mf, IKsControl, IKsControl_Impl, DEFAULT_SAMPLE_DURATION_100NS, DEFAULT_STREAM_HEIGHT,
     DEFAULT_STREAM_WIDTH, HR_ERROR_SET_NOT_FOUND, PINNAME_VIDEO_CAPTURE,
 };
+use crate::factory::ModuleRef;
 
 struct StreamInner {
     parent_source: Option<IMFMediaSource>,
@@ -77,6 +78,8 @@ struct StreamInner {
     is_nv12: bool,
     state: MF_STREAM_STATE,
     is_shutdown: bool,
+    /// Keeps the DLL loaded while this object is alive (see `DllCanUnloadNow`).
+    _module: ModuleRef,
 }
 
 #[derive(Clone)]
@@ -141,6 +144,7 @@ impl SmartCamMfMediaStream {
             is_nv12: false,
             state: MF_STREAM_STATE_STOPPED,
             is_shutdown: false,
+            _module: ModuleRef::new(),
         };
 
         Ok(Self {

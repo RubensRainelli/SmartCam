@@ -36,7 +36,7 @@ use windows::{
 
 use crate::{
     constants::CLSID_SMARTCAM_MF_SOURCE,
-    factory::{SmartCamClassFactory, SERVER_LOCKS},
+    factory::{SmartCamClassFactory, LIVE_OBJECTS, SERVER_LOCKS},
 };
 
 static MODULE_HANDLE: AtomicUsize = AtomicUsize::new(0);
@@ -213,7 +213,15 @@ pub unsafe extern "system" fn DllGetClassObject(
 
 #[no_mangle]
 pub unsafe extern "system" fn DllCanUnloadNow() -> HRESULT {
-    if SERVER_LOCKS.load(Ordering::SeqCst) == 0 {
+    can_unload(
+        SERVER_LOCKS.load(Ordering::SeqCst),
+        LIVE_OBJECTS.load(Ordering::SeqCst),
+    )
+}
+
+/// COM may unload the DLL only when no client holds a server lock and no object is alive.
+fn can_unload(server_locks: i32, live_objects: i32) -> HRESULT {
+    if server_locks == 0 && live_objects == 0 {
         S_OK
     } else {
         S_FALSE
@@ -244,4 +252,62 @@ pub unsafe extern "system" fn DllUnregisterServer() -> HRESULT {
     unregister_from_root_hive(HKEY_CURRENT_USER);
     unregister_from_root_hive(HKEY_LOCAL_MACHINE);
     S_OK
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::factory::ModuleRef;
+    use windows::{
+        core::Interface,
+        Win32::{
+            Media::MediaFoundation::{IMFActivate, IMFMediaSource, MFStartup, MF_VERSION},
+            System::Com::{CoInitializeEx, IClassFactory, COINIT_MULTITHREADED},
+        },
+    };
+
+    #[test]
+    fn can_unload_only_without_server_locks_and_live_objects() {
+        assert_eq!(can_unload(0, 0), S_OK);
+        assert_eq!(can_unload(1, 0), S_FALSE);
+        assert_eq!(can_unload(0, 1), S_FALSE);
+        assert_eq!(can_unload(2, 3), S_FALSE);
+    }
+
+    #[test]
+    fn module_refs_count_up_while_alive_and_back_down_when_dropped() {
+        // Other tests create and release a few COM objects concurrently, so compare against a
+        // margin far below the 1000 references created here instead of exact counts.
+        const N: i32 = 1000;
+        const NOISE: i32 = 100;
+        let before = LIVE_OBJECTS.load(Ordering::SeqCst);
+        let refs: Vec<ModuleRef> = (0..N).map(|_| ModuleRef::new()).collect();
+        let alive = LIVE_OBJECTS.load(Ordering::SeqCst);
+        drop(refs);
+        let after = LIVE_OBJECTS.load(Ordering::SeqCst);
+        assert!(alive - before > N - NOISE, "{before} -> {alive}: references were not counted");
+        assert!(alive - after > N - NOISE, "{alive} -> {after}: dropped references were not released");
+    }
+
+    #[test]
+    fn dll_can_unload_now_is_false_while_com_objects_are_alive() {
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            let _ = MFStartup(MF_VERSION, 0);
+
+            let mut factory_ptr = std::ptr::null_mut();
+            assert_eq!(DllGetClassObject(&CLSID_SMARTCAM_MF_SOURCE, &IClassFactory::IID, &mut factory_ptr), S_OK);
+            let factory = IClassFactory::from_raw(factory_ptr);
+            assert_eq!(DllCanUnloadNow(), S_FALSE, "a class factory is alive");
+
+            let activate: IMFActivate = factory.CreateInstance(None).expect("CreateInstance");
+            let source: IMFMediaSource = activate.ActivateObject().expect("ActivateObject");
+            drop(activate);
+            drop(factory);
+            // No LockServer call anywhere: only the live media source (and its stream) keep the
+            // DLL in use. Unloading it now would leave their vtables pointing at freed code.
+            assert_eq!(DllCanUnloadNow(), S_FALSE, "a media source is alive");
+            let _ = source.Shutdown();
+        }
+    }
 }
