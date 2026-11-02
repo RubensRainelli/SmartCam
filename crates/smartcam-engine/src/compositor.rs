@@ -58,6 +58,36 @@ pub fn fill_solid_bg(
     true
 }
 
+/// Checks the `blend_bgra*` buffers before any row is touched: each stride must cover a full
+/// row (`width * 4`, or `width` for the gray8 mask) and each buffer must hold `height` strides.
+/// The SIMD paths write through raw pointers, so this is what keeps them inside the slices.
+#[inline]
+fn blend_buffers_valid(
+    fg: &[u8],
+    bg: &[u8],
+    mask: &[u8],
+    out: &[u8],
+    width: u32,
+    height: u32,
+    stride_fg: u32,
+    stride_bg: u32,
+    stride_mask: u32,
+    stride_out: u32,
+) -> bool {
+    let w = width as usize;
+    let h = height as usize;
+    let plane_ok = |len: usize, stride: u32, row_bytes: usize| {
+        let s = stride as usize;
+        s >= row_bytes && len >= s * h
+    };
+    w != 0
+        && h != 0
+        && plane_ok(fg.len(), stride_fg, w * 4)
+        && plane_ok(bg.len(), stride_bg, w * 4)
+        && plane_ok(mask.len(), stride_mask, w)
+        && plane_ok(out.len(), stride_out, w * 4)
+}
+
 /// Blends foreground over background using single-channel gray8 mask into output (Scalar path).
 #[inline]
 pub fn blend_bgra_scalar(
@@ -74,7 +104,7 @@ pub fn blend_bgra_scalar(
 ) -> bool {
     let w = width as usize;
     let h = height as usize;
-    if w == 0 || h == 0 {
+    if !blend_buffers_valid(fg, bg, mask, out, width, height, stride_fg, stride_bg, stride_mask, stride_out) {
         return false;
     }
 
@@ -108,6 +138,10 @@ pub fn blend_bgra_scalar(
 }
 
 /// Blends foreground over background using single-channel gray8 mask into output (AVX2 path).
+///
+/// # Safety
+/// Requires AVX2, and every stride must cover a row and every slice `height` strides: rows are
+/// accessed through raw pointers without bounds checks. `blend_bgra` validates this first.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub unsafe fn blend_bgra_avx2(
@@ -215,6 +249,10 @@ pub unsafe fn blend_bgra_avx2(
 }
 
 /// Blends foreground over background using single-channel gray8 mask into output (AVX-512 path).
+///
+/// # Safety
+/// Requires AVX-512F/BW, and every stride must cover a row and every slice `height` strides: rows
+/// are accessed through raw pointers without bounds checks. `blend_bgra` validates this first.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f,avx512bw")]
 pub unsafe fn blend_bgra_avx512(
@@ -337,7 +375,7 @@ pub fn blend_bgra_neon(
 
     let w = width as usize;
     let h = height as usize;
-    if w == 0 || h == 0 {
+    if !blend_buffers_valid(fg, bg, mask, out, width, height, stride_fg, stride_bg, stride_mask, stride_out) {
         return false;
     }
 
@@ -439,6 +477,9 @@ pub fn blend_bgra(
     stride_out: u32,
     requested_tier: SimdTier,
 ) -> bool {
+    if !blend_buffers_valid(fg, bg, mask, out, width, height, stride_fg, stride_bg, stride_mask, stride_out) {
+        return false;
+    }
     let tier = match requested_tier {
         SimdTier::Auto => crate::detect_best_simd_tier(),
         t => t,
@@ -694,4 +735,104 @@ pub fn generate_blurred_bg(
 
     let _ = tier;
     generate_blurred_bg_scalar(src, dst, width, height, stride, radius)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const GUARD: u8 = 0xAA;
+
+    /// Tiers that `blend_bgra` can actually dispatch to on this CPU.
+    fn tiers() -> Vec<SimdTier> {
+        let mut t = vec![SimdTier::Scalar, SimdTier::Auto];
+        #[cfg(target_arch = "x86_64")]
+        {
+            if std::arch::is_x86_feature_detected!("avx2") {
+                t.push(SimdTier::Avx2);
+            }
+            if std::arch::is_x86_feature_detected!("avx512f") && std::arch::is_x86_feature_detected!("avx512bw") {
+                t.push(SimdTier::Avx512);
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        t.push(SimdTier::Neon);
+        t
+    }
+
+    /// Calls `blend_bgra` on a `w`x`h` frame whose buffers have the given lengths and strides.
+    /// Every buffer lives at the start of a larger allocation filled with `GUARD`, so the test can
+    /// see writes past `out` instead of corrupting the heap. Returns (result, bytes changed past `out`).
+    fn blend_with(
+        tier: SimdTier,
+        (w, h): (u32, u32),
+        (fg_len, bg_len, mask_len, out_len): (usize, usize, usize, usize),
+        (s_fg, s_bg, s_mask, s_out): (u32, u32, u32, u32),
+    ) -> (bool, usize) {
+        let fg = vec![0x10u8; fg_len];
+        let bg = vec![0x20u8; bg_len];
+        let mask = vec![255u8; mask_len];
+        let mut out_alloc = vec![GUARD; out_len + 4096];
+        let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            blend_bgra(&fg, &bg, &mask, &mut out_alloc[..out_len], w, h, s_fg, s_bg, s_mask, s_out, tier)
+        }))
+        .unwrap_or_else(|_| panic!("blend_bgra panicked for {tier:?} instead of returning false"));
+        let past_out = out_alloc[out_len..].iter().filter(|&&b| b != GUARD).count();
+        (ok, past_out)
+    }
+
+    #[test]
+    fn blend_bgra_rejects_buffers_shorter_than_the_frame() {
+        let (w, h) = (40u32, 3u32); // wider than one AVX-512 block, so every SIMD path runs
+        let rgba = (w * 4 * h) as usize;
+        let gray = (w * h) as usize;
+        let strides = (w * 4, w * 4, w, w * 4);
+        for tier in tiers() {
+            for (name, lens) in [
+                ("out", (rgba, rgba, gray, 4)),
+                ("out by one row", (rgba, rgba, gray, rgba - (w * 4) as usize)),
+                ("fg", (rgba - 1, rgba, gray, rgba)),
+                ("bg", (rgba, 8, gray, rgba)),
+                ("mask", (rgba, rgba, gray - 1, rgba)),
+            ] {
+                let (ok, past_out) = blend_with(tier, (w, h), lens, strides);
+                assert!(!ok, "{tier:?}: short {name} buffer was accepted");
+                assert_eq!(past_out, 0, "{tier:?}: short {name} buffer: wrote {past_out} bytes past `out`");
+            }
+        }
+    }
+
+    #[test]
+    fn blend_bgra_rejects_strides_narrower_than_a_row() {
+        let (w, h) = (40u32, 3u32);
+        let big = 4096usize;
+        for tier in tiers() {
+            for (name, strides) in [
+                ("fg", (w * 4 - 1, w * 4, w, w * 4)),
+                ("bg", (w * 4, 0, w, w * 4)),
+                ("mask", (w * 4, w * 4, w - 1, w * 4)),
+                ("out", (w * 4, w * 4, w, w)),
+            ] {
+                let (ok, _) = blend_with(tier, (w, h), (big, big, big, big), strides);
+                assert!(!ok, "{tier:?}: {name} stride narrower than a row was accepted");
+            }
+        }
+    }
+
+    #[test]
+    fn blend_bgra_accepts_padded_strides_and_blends() {
+        let (w, h) = (40u32, 3u32);
+        let (s_rgba, s_mask) = (w * 4 + 12, w + 5);
+        for tier in tiers() {
+            let fg = vec![200u8; (s_rgba * h) as usize];
+            let bg = vec![0u8; (s_rgba * h) as usize];
+            let mask = vec![255u8; (s_mask * h) as usize];
+            let mut out = vec![0u8; (s_rgba * h) as usize];
+            assert!(blend_bgra(&fg, &bg, &mask, &mut out, w, h, s_rgba, s_rgba, s_mask, s_rgba, tier), "{tier:?}");
+            for y in 0..h as usize {
+                let row = &out[y * s_rgba as usize..y * s_rgba as usize + (w * 4) as usize];
+                assert!(row.chunks_exact(4).all(|px| px == [200, 200, 200, 255]), "{tier:?}: row {y} = {:?}", &row[..8]);
+            }
+        }
+    }
 }
