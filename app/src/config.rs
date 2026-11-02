@@ -673,7 +673,7 @@ impl SmartCamConfig {
                     }
                 }
                 ("segmentation", "green_screen", "spill_suppression") => {
-                    if let Ok(n) = val.parse::<f32>() {
+                    if let Some(n) = parse_finite_f32(&val) {
                         cfg.segmentation.green_screen.spill_suppression = n;
                     }
                 }
@@ -691,12 +691,12 @@ impl SmartCamConfig {
                     }
                 }
                 ("segmentation", "ai_selfie", "confidence_threshold") => {
-                    if let Ok(n) = val.parse::<f32>() {
+                    if let Some(n) = parse_finite_f32(&val) {
                         cfg.segmentation.ai_selfie.confidence_threshold = n;
                     }
                 }
                 ("segmentation", "ai_selfie", "temporal_smoothing") => {
-                    if let Ok(n) = val.parse::<f32>() {
+                    if let Some(n) = parse_finite_f32(&val) {
                         cfg.segmentation.ai_selfie.temporal_smoothing = n;
                     }
                 }
@@ -706,7 +706,7 @@ impl SmartCamConfig {
                     }
                 }
                 ("segmentation", "ai_selfie", "bg_diff_tolerance") => {
-                    if let Ok(n) = val.parse::<f32>() {
+                    if let Some(n) = parse_finite_f32(&val) {
                         cfg.segmentation.ai_selfie.bg_diff_tolerance = n;
                     }
                 }
@@ -719,22 +719,22 @@ impl SmartCamConfig {
                     cfg.segmentation.ai_selfie.face_calibrated = parse_yaml_bool(&val, false);
                 }
                 ("segmentation", "ai_selfie", "calib_skin_cb") => {
-                    if let Ok(n) = val.parse::<f32>() {
+                    if let Some(n) = parse_finite_f32(&val) {
                         cfg.segmentation.ai_selfie.calib_skin_cb = n;
                     }
                 }
                 ("segmentation", "ai_selfie", "calib_skin_cr") => {
-                    if let Ok(n) = val.parse::<f32>() {
+                    if let Some(n) = parse_finite_f32(&val) {
                         cfg.segmentation.ai_selfie.calib_skin_cr = n;
                     }
                 }
                 ("segmentation", "ai_selfie", "calib_head_rx") => {
-                    if let Ok(n) = val.parse::<f32>() {
+                    if let Some(n) = parse_finite_f32(&val) {
                         cfg.segmentation.ai_selfie.calib_head_rx = n;
                     }
                 }
                 ("segmentation", "ai_selfie", "calib_head_ry") => {
-                    if let Ok(n) = val.parse::<f32>() {
+                    if let Some(n) = parse_finite_f32(&val) {
                         cfg.segmentation.ai_selfie.calib_head_ry = n;
                     }
                 }
@@ -770,17 +770,17 @@ impl SmartCamConfig {
                     }
                 }
                 ("compositor", _, "background_zoom") => {
-                    if let Ok(n) = val.parse::<f32>() {
+                    if let Some(n) = parse_finite_f32(&val) {
                         cfg.compositor.background_zoom = n;
                     }
                 }
                 ("compositor", _, "background_pan_x") => {
-                    if let Ok(n) = val.parse::<f32>() {
+                    if let Some(n) = parse_finite_f32(&val) {
                         cfg.compositor.background_pan_x = n;
                     }
                 }
                 ("compositor", _, "background_pan_y") => {
-                    if let Ok(n) = val.parse::<f32>() {
+                    if let Some(n) = parse_finite_f32(&val) {
                         cfg.compositor.background_pan_y = n;
                     }
                 }
@@ -807,7 +807,7 @@ impl SmartCamConfig {
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        let shm_escaped = self.virtual_camera.shared_memory_name.replace('\\', "\\\\");
+        let shm_escaped = yaml_escape(&self.virtual_camera.shared_memory_name);
         let bg_img_escaped = self.compositor.background_image_path.replace('\\', "/");
         let rgb = self.compositor.background_color_rgb;
         let plugins_yaml = if self.enabled_plugins.is_empty() {
@@ -909,24 +909,24 @@ virtual_camera:\n\
 \x20 backend: \"{vcam_backend}\"   # Windows 11 native Media Foundation Virtual Camera\n\
 \x20 shared_memory_name: \"{shm}\"\n",
             header = PEFL_YAML_HEADER.trim_end(),
-            icon_theme = self.app_icon_theme,
-            compute_backend = self.compute_backend,
+            icon_theme = yaml_escape(&self.app_icon_theme),
+            compute_backend = yaml_escape(&self.compute_backend),
             ai_enabled = if self.ai_enabled { "true" } else { "false" },
             plugins_yaml = plugins_yaml,
             phone_url = self.phone_camera_url.replace('\\', "/"),
             phone_port = self.phone_camera_port,
             dev_idx = self.camera_input.device_index,
-            dev_id = self.camera_input.device_id,
+            dev_id = yaml_escape(&self.camera_input.device_id),
             in_w = self.camera_input.width,
             in_h = self.camera_input.height,
             fps = self.camera_input.fps,
             bit_depth = self.camera_input.bit_depth,
-            ar = self.framing_output.aspect_ratio,
-            res_preset = self.framing_output.resolution_preset,
-            cs = self.framing_output.crop_strategy,
+            ar = yaml_escape(&self.framing_output.aspect_ratio),
+            res_preset = yaml_escape(&self.framing_output.resolution_preset),
+            cs = yaml_escape(&self.framing_output.crop_strategy),
             out_w = self.framing_output.output_width,
             out_h = self.framing_output.output_height,
-            mode = self.segmentation.mode,
+            mode = yaml_escape(&self.segmentation.mode),
             hmin = self.segmentation.green_screen.hue_min,
             hmax = self.segmentation.green_screen.hue_max,
             smin = self.segmentation.green_screen.sat_min,
@@ -936,7 +936,7 @@ virtual_camera:\n\
             morph = self.segmentation.green_screen.morph_kernel_size,
             blur = self.segmentation.green_screen.blur_radius,
             spill = self.segmentation.green_screen.spill_suppression,
-            model = self.segmentation.ai_selfie.model_path,
+            model = yaml_escape(&self.segmentation.ai_selfie.model_path),
             ai_w = self.segmentation.ai_selfie.input_width,
             ai_h = self.segmentation.ai_selfie.input_height,
             ai_conf = self.segmentation.ai_selfie.confidence_threshold,
@@ -952,8 +952,8 @@ virtual_camera:\n\
             lm_yaml = lm_yaml,
             ai_threads = self.segmentation.ai_selfie.intra_op_threads,
             ai_igpu = if self.segmentation.ai_selfie.prefer_igpu_directml { "true" } else { "false" },
-            simd = self.compositor.simd_acceleration,
-            bg_mode = self.compositor.background_mode,
+            simd = yaml_escape(&self.compositor.simd_acceleration),
+            bg_mode = yaml_escape(&self.compositor.background_mode),
             r = rgb[0],
             g = rgb[1],
             b = rgb[2],
@@ -964,8 +964,8 @@ virtual_camera:\n\
             bg_py = self.compositor.background_pan_y,
             bg_mir_h = if self.compositor.background_mirror_h { "true" } else { "false" },
             bg_mir_v = if self.compositor.background_mirror_v { "true" } else { "false" },
-            vcam_name = self.virtual_camera.friendly_name,
-            vcam_backend = self.virtual_camera.backend,
+            vcam_name = yaml_escape(&self.virtual_camera.friendly_name),
+            vcam_backend = yaml_escape(&self.virtual_camera.backend),
             shm = shm_escaped,
         );
 
@@ -1030,6 +1030,16 @@ fn strip_yaml_comment(line: &str) -> String {
     out
 }
 
+/// Parses a float setting; NaN and infinities are rejected (f32::clamp would let NaN through).
+fn parse_finite_f32(val: &str) -> Option<f32> {
+    val.parse::<f32>().ok().filter(|v| v.is_finite())
+}
+
+/// Escapes a string written between double quotes: clean_scalar() turns `\\` back into `\`.
+fn yaml_escape(val: &str) -> String {
+    val.replace('\\', "\\\\")
+}
+
 fn clean_scalar(val: &str) -> String {
     let v = val.trim();
     // len >= 2: a lone `"` or `'` both starts and ends with the quote but has nothing to strip
@@ -1069,8 +1079,8 @@ fn parse_landmarks_array(val: &str) -> Option<[(f32, f32); 5]> {
     }
     let mut out = [(0.5f32, 0.5f32); 5];
     for i in 0..5 {
-        let px: f32 = parts[i * 2].parse().ok()?;
-        let py: f32 = parts[i * 2 + 1].parse().ok()?;
+        let px: f32 = parts[i * 2].parse().ok().filter(|v: &f32| v.is_finite())?;
+        let py: f32 = parts[i * 2 + 1].parse().ok().filter(|v: &f32| v.is_finite())?;
         out[i] = (px.clamp(0.0, 1.0), py.clamp(0.0, 1.0));
     }
     Some(out)
@@ -1229,5 +1239,50 @@ mod tests {
         assert_eq!(cfg.camera_input.device_id, "\"");
         assert_eq!(cfg.camera_input.fps, 25);
         assert_eq!(cfg.enabled_plugins, vec!["'".to_string()]);
+    }
+
+    #[test]
+    fn non_finite_floats_in_the_file_keep_the_defaults() {
+        // "NaN"/"inf" parse as f32, and f32::clamp lets NaN through unchanged.
+        let path = temp_yaml_path("non_finite");
+        fs::write(
+            &path,
+            "segmentation:\n  green_screen:\n    spill_suppression: NaN\n  ai_selfie:\n    \
+             confidence_threshold: -inf\n    bg_diff_tolerance: nan\n    calib_skin_cb: inf\n    \
+             calib_landmarks: [NaN, 0.36, 0.55, 0.36, 0.50, 0.42, 0.50, 0.48, 0.50, 0.54]\n\
+             compositor:\n  background_zoom: NaN\n  background_pan_x: inf\n  background_pan_y: -inf\n",
+        )
+        .expect("write yaml");
+        let cfg = SmartCamConfig::load_from_file(&path);
+        let _ = fs::remove_file(&path);
+
+        let d = SmartCamConfig::default();
+        assert_eq!(cfg.segmentation.green_screen.spill_suppression, d.segmentation.green_screen.spill_suppression);
+        let (ai, d_ai) = (&cfg.segmentation.ai_selfie, &d.segmentation.ai_selfie);
+        assert_eq!(ai.confidence_threshold, d_ai.confidence_threshold);
+        assert_eq!(ai.bg_diff_tolerance, d_ai.bg_diff_tolerance);
+        assert_eq!(ai.calib_skin_cb, d_ai.calib_skin_cb);
+        assert_eq!(ai.calib_landmarks, d_ai.calib_landmarks);
+        assert_eq!(cfg.compositor.background_zoom, d.compositor.background_zoom);
+        assert_eq!(cfg.compositor.background_pan_x, d.compositor.background_pan_x);
+        assert_eq!(cfg.compositor.background_pan_y, d.compositor.background_pan_y);
+    }
+
+    #[test]
+    fn backslashes_in_strings_survive_save_and_load() {
+        let mut cfg = SmartCamConfig::default();
+        cfg.camera_input.device_id = r"\\?\usb#vid_046d&pid_0825&mi_00#7&1".to_string();
+        cfg.segmentation.ai_selfie.model_path = r"\\nas\models\selfie.onnx".to_string();
+        cfg.virtual_camera.friendly_name = r"Studio\\Cam\".to_string();
+
+        let path = temp_yaml_path("backslashes");
+        for cycle in 1..=2 {
+            cfg.save_to_file(&path).expect("save_to_file");
+            cfg = SmartCamConfig::load_from_file(&path);
+            assert_eq!(cfg.camera_input.device_id, r"\\?\usb#vid_046d&pid_0825&mi_00#7&1", "cycle {cycle}");
+            assert_eq!(cfg.segmentation.ai_selfie.model_path, r"\\nas\models\selfie.onnx", "cycle {cycle}");
+            assert_eq!(cfg.virtual_camera.friendly_name, r"Studio\\Cam\", "cycle {cycle}");
+        }
+        let _ = fs::remove_file(&path);
     }
 }
