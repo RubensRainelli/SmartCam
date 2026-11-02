@@ -108,8 +108,14 @@ fn create_video_media_type(width: u32, height: u32, fps: u32, subtype: &GUID) ->
         mt.SetUINT32(&MF_MT_AVG_BITRATE, bitrate)?;
         mt.SetUINT32(&MF_MT_VIDEO_PRIMARIES, MFVideoPrimaries_BT709.0 as u32)?;
         mt.SetUINT32(&MF_MT_TRANSFER_FUNCTION, MFVideoTransFunc_709.0 as u32)?;
-        mt.SetUINT32(&MF_MT_YUV_MATRIX, MFVideoTransferMatrix_BT709.0 as u32)?;
-        mt.SetUINT32(&MF_MT_VIDEO_NOMINAL_RANGE, MFNominalRange_0_255.0 as u32)?;
+        if is_nv12 {
+            // Must describe what the stream's BGRA -> NV12 converter actually writes.
+            mt.SetUINT32(&MF_MT_YUV_MATRIX, crate::stream::NV12_YUV_MATRIX.0 as u32)?;
+            mt.SetUINT32(&MF_MT_VIDEO_NOMINAL_RANGE, crate::stream::NV12_NOMINAL_RANGE.0 as u32)?;
+        } else {
+            mt.SetUINT32(&MF_MT_YUV_MATRIX, MFVideoTransferMatrix_BT709.0 as u32)?;
+            mt.SetUINT32(&MF_MT_VIDEO_NOMINAL_RANGE, MFNominalRange_0_255.0 as u32)?;
+        }
     }
     Ok(mt)
 }
@@ -779,5 +785,32 @@ impl IKsControl_Impl for SmartCamMfMediaSource_Impl {
         }
         trace_mf("Source::KsEvent -> ERROR_SET_NOT_FOUND");
         HR_ERROR_SET_NOT_FOUND
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows::Win32::Media::MediaFoundation::{
+        MFNominalRange_16_235, MFStartup, MFVideoFormat_RGB32, MFVideoTransferMatrix_BT601, MF_VERSION,
+    };
+
+    fn media_type_u32(mt: &IMFMediaType, key: &GUID) -> u32 {
+        unsafe { mt.GetUINT32(key).expect("attribute present") }
+    }
+
+    #[test]
+    fn nv12_media_type_advertises_the_encoding_the_converter_writes() {
+        unsafe {
+            let _ = MFStartup(MF_VERSION, 0);
+        }
+        // bgra_to_nv12_pitched() uses BT.601 coefficients and studio range (Y 16..235).
+        let nv12 = create_video_media_type(1440, 1080, 30, &MFVideoFormat_NV12).expect("NV12 type");
+        assert_eq!(media_type_u32(&nv12, &MF_MT_YUV_MATRIX), MFVideoTransferMatrix_BT601.0 as u32, "YUV matrix");
+        assert_eq!(media_type_u32(&nv12, &MF_MT_VIDEO_NOMINAL_RANGE), MFNominalRange_16_235.0 as u32, "nominal range");
+
+        // RGB32 is full range; that part of the declaration was already right.
+        let rgb = create_video_media_type(1440, 1080, 30, &MFVideoFormat_RGB32).expect("RGB32 type");
+        assert_eq!(media_type_u32(&rgb, &MF_MT_VIDEO_NOMINAL_RANGE), MFNominalRange_0_255.0 as u32);
     }
 }

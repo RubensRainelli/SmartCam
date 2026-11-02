@@ -35,11 +35,18 @@ use windows::{
             MF_DEVICESTREAM_STREAM_CATEGORY, MF_DEVICESTREAM_STREAM_ID,
             MF_E_INVALID_STATE_TRANSITION, MF_E_SHUTDOWN, MF_MT_FRAME_SIZE, MF_MT_SUBTYPE,
             MF_STREAM_STATE, MF_STREAM_STATE_PAUSED, MF_STREAM_STATE_RUNNING,
-            MF_STREAM_STATE_STOPPED,
+            MF_STREAM_STATE_STOPPED, MFNominalRange, MFNominalRange_16_235, MFVideoTransferMatrix,
+            MFVideoTransferMatrix_BT601,
         },
     },
 };
 use windows_core::{PCWSTR, PROPVARIANT, PWSTR};
+
+/// Colour encoding written by `SmartCamMfMediaStream::bgra_to_nv12_pitched`: BT.601 matrix and
+/// studio range (Y 16..235, UV 16..240). NV12 media types must advertise exactly this, or
+/// consumers decode the frames with the wrong matrix and range.
+pub(crate) const NV12_YUV_MATRIX: MFVideoTransferMatrix = MFVideoTransferMatrix_BT601;
+pub(crate) const NV12_NOMINAL_RANGE: MFNominalRange = MFNominalRange_16_235;
 
 use smartcam_capture::{
     SharedFrameIpc, DEFAULT_SHARED_EVENT_NAME, DEFAULT_SHARED_MAPPING_NAME, MAX_SHARED_FRAME_BYTES,
@@ -1019,5 +1026,30 @@ impl IKsControl_Impl for SmartCamMfMediaStream_Impl {
         }
         trace_mf("Stream::KsEvent -> ERROR_SET_NOT_FOUND");
         HR_ERROR_SET_NOT_FOUND
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Converts a uniform 2x2 BGRA frame and returns (Y, U, V) of the result.
+    fn nv12_of(b: u8, g: u8, r: u8) -> (u8, u8, u8) {
+        let src: Vec<u8> = (0..4).flat_map(|_| [b, g, r, 255]).collect();
+        let mut dst = vec![0u8; 2 * 2 * 3 / 2];
+        SmartCamMfMediaStream::bgra_to_nv12_pitched(&src, dst.as_mut_ptr(), 2, 2, 2);
+        assert!(dst[..4].iter().all(|&y| y == dst[0]), "uniform luma");
+        (dst[0], dst[4], dst[5])
+    }
+
+    #[test]
+    fn nv12_converter_writes_the_encoding_the_media_type_advertises() {
+        assert_eq!(NV12_YUV_MATRIX, MFVideoTransferMatrix_BT601);
+        assert_eq!(NV12_NOMINAL_RANGE, MFNominalRange_16_235);
+        // BT.601, studio range: black and white at the range ends, red with the BT.601 luma
+        // weight (16 + 219 * 0.299 = 81.5; BT.709 would give about 63).
+        assert_eq!(nv12_of(0, 0, 0), (16, 128, 128), "black");
+        assert_eq!(nv12_of(255, 255, 255), (235, 128, 128), "white");
+        assert_eq!(nv12_of(0, 0, 255), (82, 90, 240), "red");
     }
 }
