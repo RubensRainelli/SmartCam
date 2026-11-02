@@ -1338,12 +1338,15 @@ pub fn extract_mjpeg_frame_from_buffer(buf: &[u8]) -> Option<(Vec<u8>, usize)> {
                 }
             }
             let payload_start = boundary_pos + hdr_end_rel + 4;
-            if let Some(len) = declared_len {
+            // The sender controls Content-Length: a value whose end offset overflows is bogus
+            // and is ignored (the SOI..EOI scan below still applies).
+            let declared = declared_len.and_then(|len| Some((len, payload_start.checked_add(len)?)));
+            if let Some((len, payload_end)) = declared {
                 if len >= 4 && (is_jpeg_part || payload_start + 3 <= buf.len()) {
-                    if buf.len() >= payload_start + len {
-                        let candidate = &buf[payload_start..payload_start + len];
+                    if buf.len() >= payload_end {
+                        let candidate = &buf[payload_start..payload_end];
                         if candidate.starts_with(&[0xFF, 0xD8]) {
-                            return Some((candidate.to_vec(), payload_start + len));
+                            return Some((candidate.to_vec(), payload_end));
                         }
                     } else {
                         // Wait for more bytes to complete the declared Content-Length
@@ -4940,5 +4943,32 @@ mod tests {
         apply_multi_person_mask_refinement(&bgra, &mut mask, 64, 64);
         apply_teleprompter_overlay_bgra(&mut bgra, 64, 64, "TEST TELEPROMPTER", 1);
         assert_eq!(bgra[3], 255);
+    }
+
+    #[test]
+    fn mjpeg_part_with_an_overflowing_content_length_does_not_panic() {
+        // A camera (or anything answering on the configured address) controls this header.
+        let header = "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {len}\r\n\r\n";
+        let jpeg = [0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 0xFF, 0xD9];
+        // payload_start + len overflows: debug builds panicked on the add, release builds
+        // wrapped and then panicked slicing buf[payload_start..wrapped_end].
+        for len in [usize::MAX, usize::MAX - 10] {
+            let mut buf = header.replace("{len}", &len.to_string()).into_bytes();
+            buf.extend_from_slice(&jpeg);
+            let result = std::panic::catch_unwind(|| extract_mjpeg_frame_from_buffer(&buf))
+                .unwrap_or_else(|_| panic!("Content-Length {len} panicked"));
+            // The impossible length is ignored and the SOI..EOI scan still finds the frame.
+            assert_eq!(result.map(|(frame, _)| frame), Some(jpeg.to_vec()), "Content-Length {len}");
+        }
+    }
+
+    #[test]
+    fn mjpeg_part_with_a_valid_content_length_is_still_extracted() {
+        let jpeg = [0xFF, 0xD8, 0xFF, 0xE0, 9, 8, 7, 0xFF, 0xD9];
+        let mut buf = format!("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\n\r\n", jpeg.len()).into_bytes();
+        let payload_end = buf.len() + jpeg.len();
+        buf.extend_from_slice(&jpeg);
+        buf.extend_from_slice(b"\r\n--frame\r\n");
+        assert_eq!(extract_mjpeg_frame_from_buffer(&buf), Some((jpeg.to_vec(), payload_end)));
     }
 }
