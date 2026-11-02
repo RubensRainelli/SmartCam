@@ -243,6 +243,14 @@ pub fn resize_bilinear_roi_scalar(
     if bpp != 4 && bpp != 1 {
         return false;
     }
+    // Both buffers must hold `height` strides, and a stride must cover a full row.
+    let plane_ok = |len: usize, w: u32, h: u32, stride: u32| {
+        let s = stride as usize;
+        s >= w as usize * bpp && len >= s * h as usize
+    };
+    if !plane_ok(src.len(), src_w, src_h, stride_src) || !plane_ok(dst.len(), dst_w, dst_h, stride_dst) {
+        return false;
+    }
 
     // Fast 1:1 scanline copy when source and destination ROI dimensions match exactly
     if src_roi.width == dst_roi.width && src_roi.height == dst_roi.height {
@@ -461,7 +469,9 @@ pub fn crop_scale_bgra_scalar(
         }
         CropStrategy::Letterbox => {
             // Fill background with black using fast 32-bit slice fill
-            crate::compositor::fill_solid_bg(dst, dst_w, dst_h, stride_dst, 0, 0, 0, true);
+            if !crate::compositor::fill_solid_bg(dst, dst_w, dst_h, stride_dst, 0, 0, 0, true) {
+                return false;
+            }
 
             let src_full = CropRect {
                 x: 0,
@@ -568,4 +578,88 @@ pub fn crop_scale_bgra(
     crop_scale_bgra_scalar(
         src, src_w, src_h, stride_src, dst, dst_w, dst_h, stride_dst, aspect_w, aspect_h, strategy,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tiers() -> Vec<SimdTier> {
+        let mut t = vec![SimdTier::Scalar, SimdTier::Auto];
+        #[cfg(target_arch = "x86_64")]
+        {
+            if std::arch::is_x86_feature_detected!("avx2") {
+                t.push(SimdTier::Avx2);
+            }
+            if std::arch::is_x86_feature_detected!("avx512f") && std::arch::is_x86_feature_detected!("avx512bw") {
+                t.push(SimdTier::Avx512);
+            }
+        }
+        t
+    }
+
+    /// Runs `crop_scale_bgra` and turns a panic into a test failure that names the case.
+    fn crop(
+        src: &[u8], (sw, sh, ss): (u32, u32, u32),
+        dst: &mut [u8], (dw, dh, ds): (u32, u32, u32),
+        strategy: CropStrategy, tier: SimdTier, case: &str,
+    ) -> bool {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crop_scale_bgra(src, sw, sh, ss, dst, dw, dh, ds, 4, 3, strategy, tier)
+        }))
+        .unwrap_or_else(|_| panic!("crop_scale_bgra panicked ({case}, {strategy:?}, {tier:?}) instead of returning false"))
+    }
+
+    #[test]
+    fn crop_scale_rejects_buffers_that_do_not_hold_the_frame() {
+        let (sw, sh) = (64u32, 48u32);
+        let (dw, dh) = (32u32, 24u32);
+        let src_ok = vec![0u8; (sw * 4 * sh) as usize];
+        for strategy in [CropStrategy::CenterCrop, CropStrategy::Letterbox] {
+            for tier in tiers() {
+                let mut dst = vec![0u8; (dw * 4 * dh) as usize];
+                // Source holds only 1920x1080 worth of rows of a bigger claimed frame (linux_app.rs case).
+                assert!(!crop(&src_ok[..(sw * 4 * 10) as usize], (sw, sh, sw * 4), &mut dst, (dw, dh, dw * 4), strategy, tier, "short src"));
+                assert!(!crop(&src_ok, (sw, sh, 0), &mut dst, (dw, dh, dw * 4), strategy, tier, "src stride 0"));
+                assert!(!crop(&src_ok, (sw, sh, sw * 4 - 4), &mut dst, (dw, dh, dw * 4), strategy, tier, "src stride < row"));
+                let mut short_dst = vec![0u8; (dw * 4 * dh) as usize - 1];
+                assert!(!crop(&src_ok, (sw, sh, sw * 4), &mut short_dst, (dw, dh, dw * 4), strategy, tier, "short dst"));
+                assert!(!crop(&src_ok, (sw, sh, sw * 4), &mut dst, (dw, dh, dw * 4 - 4), strategy, tier, "dst stride < row"));
+            }
+        }
+    }
+
+    #[test]
+    fn resize_rejects_short_gray8_buffers() {
+        let src = vec![0u8; 16 * 16];
+        let mut dst = vec![0u8; 8 * 8];
+        let full = |w, h| CropRect { x: 0, y: 0, width: w, height: h };
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            resize_bilinear_roi_scalar(&src[..100], 16, 16, 16, full(16, 16), &mut dst, 8, 8, 8, full(8, 8), 1)
+        }));
+        assert_eq!(r.ok(), Some(false), "short gray8 source must be rejected without a panic");
+    }
+
+    #[test]
+    fn crop_scale_keeps_working_with_padded_strides() {
+        // 8x6 source (4:3) with 12 bytes of row padding, copied 1:1 into an 8x6 destination.
+        let (w, h, ss) = (8u32, 6u32, 8 * 4 + 12);
+        let mut src = vec![0u8; (ss * h) as usize];
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let p = y * ss as usize + x * 4;
+                src[p..p + 4].copy_from_slice(&[x as u8, y as u8, 7, 255]);
+            }
+        }
+        for tier in tiers() {
+            let mut dst = vec![0u8; (w * 4 * h) as usize];
+            assert!(crop(&src, (w, h, ss), &mut dst, (w, h, w * 4), CropStrategy::CenterCrop, tier, "padded"));
+            for y in 0..h as usize {
+                for x in 0..w as usize {
+                    let p = (y * w as usize + x) * 4;
+                    assert_eq!(&dst[p..p + 4], &[x as u8, y as u8, 7, 255], "{tier:?} pixel ({x},{y})");
+                }
+            }
+        }
+    }
 }
