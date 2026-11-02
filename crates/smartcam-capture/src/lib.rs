@@ -140,8 +140,11 @@ mod tests {
         assert!(producer.is_consumer_active(5000));
     }
 
+    // Needs the SmartCam virtual camera installed and registered on this machine (it asserts
+    // that exactly one is enumerated), so it is opt-in: `cargo test -- --ignored`.
     #[cfg(windows)]
     #[test]
+    #[ignore = "requires the SmartCam virtual camera to be installed; run with --ignored"]
     fn test_live_vcam_frameserver_and_source_reader_roundtrip() {
         use std::ffi::c_void;
         use windows::{
