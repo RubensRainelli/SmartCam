@@ -320,6 +320,8 @@ impl GreenScreenSegmenter {
             || h == 0
             || input_frame.len() < (stride_in as usize) * h
             || out_mask.len() < (stride_out as usize) * h
+            || (stride_in as usize) < w * 4
+            || (stride_out as usize) < w
         {
             return false;
         }
@@ -690,6 +692,26 @@ impl GreenScreenSegmenter {
                     .wrapping_add(bot_row[x] as u32)
                     .wrapping_sub(top_row[x] as u32);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn green_screen_compute_mask_rejects_strides_narrower_than_a_row() {
+        let (w, h) = (4u32, 2u32);
+        let frame = vec![0u8; 32];
+        let mut mask = vec![0u8; 32];
+        for (case, stride_in, stride_out) in [("input stride 4", 4u32, w), ("mask stride 1", w * 4, 1u32)] {
+            let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                GreenScreenSegmenter::new(GreenScreenConfig::default())
+                    .compute_mask(&frame, w, h, stride_in, &mut mask, stride_out, true, SimdTier::Scalar)
+            }))
+            .unwrap_or_else(|_| panic!("{case}: panicked instead of returning false"));
+            assert!(!ok, "{case}: stride narrower than a row was accepted");
         }
     }
 }
